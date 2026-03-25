@@ -179,6 +179,6 @@ Wrote ${ENV_FILE}
   TZ=${TZ_VALUE}
 
 Next:
-  docker-compose build ttyd
-  docker-compose up -d
+  docker compose build ttyd
+  docker compose up -d
 EOF
