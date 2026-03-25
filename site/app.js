@@ -46,7 +46,7 @@ async function openWorkspace(name) {
     );
   }
 
-  window.location.href = "/terminal/session/";
+  window.location.href = "/terminal/";
 }
 
 function renderWorkspaceButton(name, badgeText = "") {

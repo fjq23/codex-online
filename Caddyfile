@@ -29,7 +29,8 @@
 
 		@terminal_page path /terminal /terminal/
 		handle @terminal_page {
-			redir / 302
+			rewrite * /terminal.html
+			file_server
 		}
 
 		@files path /files /files/*

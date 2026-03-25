@@ -1,26 +1,55 @@
-const listNode = document.querySelector("#workspace-list");
-const summaryNode = document.querySelector("#workspace-summary");
-const statusNode = document.querySelector("#workspace-status");
-const formNode = document.querySelector("#workspace-form");
-const inputNode = document.querySelector("#workspace-name");
+const workspaceNode = document.querySelector("#terminal-workspace");
+const keyStatusNode = document.querySelector("#terminal-key-status");
+const keyStripNode = document.querySelector("#key-strip");
+const frameNode = document.querySelector("#terminal-frame");
+
+const extraKeys = [
+  { label: "Esc", mode: "special", value: "Escape" },
+  { label: "Tab", mode: "special", value: "Tab" },
+  { label: "Enter", mode: "special", value: "Enter" },
+  { label: "Ctrl+C", mode: "special", value: "C-c", wide: true },
+  { label: "Ctrl+D", mode: "special", value: "C-d", wide: true },
+  { label: "Ctrl+L", mode: "special", value: "C-l", wide: true },
+  { label: "Up", mode: "special", value: "Up" },
+  { label: "Left", mode: "special", value: "Left" },
+  { label: "Down", mode: "special", value: "Down" },
+  { label: "Right", mode: "special", value: "Right" },
+  { label: "/", mode: "literal", value: "/" },
+  { label: "-", mode: "literal", value: "-" },
+  { label: "_", mode: "literal", value: "_" },
+  { label: ":", mode: "literal", value: ":" },
+  { label: "|", mode: "literal", value: "|" },
+  {
+    label: "[]",
+    sequence: [
+      { mode: "literal", value: "[]" },
+      { mode: "special", value: "Left" }
+    ]
+  },
+  {
+    label: "()",
+    sequence: [
+      { mode: "literal", value: "()" },
+      { mode: "special", value: "Left" }
+    ]
+  },
+  {
+    label: "{}",
+    sequence: [
+      { mode: "literal", value: "{}" },
+      { mode: "special", value: "Left" }
+    ]
+  },
+  { label: "~", mode: "literal", value: "~" },
+  { label: "Paste", action: "paste", wide: true }
+];
 
 function setStatus(message, isOk = false) {
-  statusNode.textContent = message;
-  statusNode.classList.toggle("ok", isOk);
-}
-
-function renderWorkspaceButton(name, badgeText = "") {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "workspace-button";
-  button.innerHTML = `
-    <span class="workspace-name">${name}</span>
-    <span class="workspace-meta">${badgeText || "Open terminal"}</span>
-  `;
-  button.addEventListener("click", async () => {
-    await openWorkspace(name);
-  });
-  return button;
+  if (!keyStatusNode) {
+    return;
+  }
+  keyStatusNode.textContent = message;
+  keyStatusNode.classList.toggle("ok", isOk);
 }
 
 async function fetchWorkspaces() {
@@ -31,73 +60,120 @@ async function fetchWorkspaces() {
   return response.json();
 }
 
-async function openWorkspace(name) {
-  setStatus("Opening workspace...");
-  const response = await fetch("/api/workspaces/open", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ name })
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "Failed to open workspace.");
-  }
-
-  window.location.href = "/terminal/session/";
-}
-
-async function refreshWorkspaces() {
-  try {
-    const payload = await fetchWorkspaces();
-    const workspaces = payload.workspaces || [];
-    const recent = payload.recent || "";
-    const selected = payload.selected || "";
-
-    listNode.innerHTML = "";
-
-    if (workspaces.length === 0) {
-      summaryNode.textContent = "No workspace yet";
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "No workspace yet. Create one below.";
-      listNode.appendChild(empty);
-      return;
-    }
-
-    summaryNode.textContent = `${workspaces.length} workspace${workspaces.length > 1 ? "s" : ""}`;
-
-    workspaces.forEach((name) => {
-      let badge = "Open terminal";
-      if (name === selected) {
-        badge = "Selected";
-      } else if (name === recent) {
-        badge = "Recent";
-      }
-      listNode.appendChild(renderWorkspaceButton(name, badge));
-    });
-  } catch (error) {
-    summaryNode.textContent = "Unavailable";
-    setStatus(error.message || "Failed to load workspaces.");
-  }
-}
-
-formNode?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const rawName = inputNode.value.trim();
-  if (!rawName) {
-    setStatus("Enter a workspace name first.");
-    inputNode.focus();
+async function updateWorkspaceTitle() {
+  if (!workspaceNode) {
     return;
   }
 
   try {
-    await openWorkspace(rawName);
+    const payload = await fetchWorkspaces();
+    const selected = payload.selected || payload.recent || "";
+    workspaceNode.textContent = selected || "No workspace selected";
   } catch (error) {
-    setStatus(error.message || "Failed to create workspace.");
+    workspaceNode.textContent = "Workspace unavailable";
+    setStatus(error.message || "Failed to load workspace.", false);
   }
+}
+
+function focusTerminalFrame() {
+  frameNode?.focus();
+  frameNode?.contentWindow?.focus();
+}
+
+async function sendKeyPayload(payload) {
+  const response = await fetch("/api/terminal/send-key", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to send key.");
+  }
+
+  setStatus(`Sent to ${data.workspace}`, true);
+  focusTerminalFrame();
+}
+
+async function handlePaste() {
+  if (!navigator.clipboard?.readText) {
+    const fallbackText = window.prompt("Paste text to send into the terminal:", "");
+    if (!fallbackText) {
+      throw new Error("Paste was cancelled.");
+    }
+    await sendKeyPayload({
+      mode: "literal",
+      value: fallbackText
+    });
+    return;
+  }
+
+  let text = "";
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (error) {
+    const fallbackText = window.prompt("Paste text to send into the terminal:", "");
+    if (!fallbackText) {
+      throw error;
+    }
+    text = fallbackText;
+  }
+
+  if (!text) {
+    throw new Error("Clipboard is empty.");
+  }
+
+  await sendKeyPayload({
+    mode: "literal",
+    value: text
+  });
+}
+
+function renderKeyButton(keyDef) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "key-button";
+  if (keyDef.wide) {
+    button.classList.add("key-button-wide");
+  }
+  button.textContent = keyDef.label;
+  button.addEventListener("click", async () => {
+    setStatus(`Sending ${keyDef.label}...`);
+    try {
+      if (keyDef.action === "paste") {
+        await handlePaste();
+        return;
+      }
+
+      await sendKeyPayload(
+        keyDef.sequence
+          ? { sequence: keyDef.sequence }
+          : { mode: keyDef.mode, value: keyDef.value }
+      );
+    } catch (error) {
+      setStatus(error.message || "Failed to send key.");
+    }
+  });
+  return button;
+}
+
+function renderExtraKeys() {
+  if (!keyStripNode) {
+    return;
+  }
+
+  keyStripNode.innerHTML = "";
+  extraKeys.forEach((keyDef) => {
+    keyStripNode.appendChild(renderKeyButton(keyDef));
+  });
+}
+
+frameNode?.addEventListener("load", () => {
+  setStatus("Terminal ready.", true);
 });
 
-refreshWorkspaces();
+renderExtraKeys();
+updateWorkspaceTitle();
