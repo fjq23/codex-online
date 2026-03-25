@@ -4,8 +4,8 @@ import os
 import re
 import subprocess
 import hashlib
-from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -215,6 +215,90 @@ def fetch_mihomo_proxies() -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def codex_login_mode() -> str:
+    result = subprocess.run(
+        ["codex", "login", "status"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = (result.stdout or result.stderr).strip()
+    if "ChatGPT" in output:
+        return "chatgpt"
+    if "API key" in output:
+        return "api_key"
+    if "Not logged in" in output:
+        return "logged_out"
+    return "unknown"
+
+
+def probe_url_status(url: str, timeout: float = 4.0) -> tuple[bool, str]:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "codex-mobile-workbench/1.0",
+            "Accept": "*/*",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return True, str(response.getcode())
+    except HTTPError as error:
+        if error.code in {200, 204, 301, 302, 307, 308, 401, 403, 405}:
+            return True, str(error.code)
+        return False, f"http-{error.code}"
+    except URLError as error:
+        return False, str(error.reason)
+    except TimeoutError:
+        return False, "timeout"
+    except Exception as error:  # pragma: no cover - defensive
+        return False, str(error)
+
+
+def codex_network_payload() -> dict:
+    login_mode = codex_login_mode()
+    api_ok, api_detail = probe_url_status("https://api.openai.com/v1/models")
+
+    if login_mode == "logged_out":
+        return {
+            "ready": False,
+            "label": "Login required",
+            "detail": "Codex is not logged in yet.",
+            "mode": login_mode,
+        }
+
+    if login_mode == "chatgpt":
+        chatgpt_ok, chatgpt_detail = probe_url_status("https://chatgpt.com/cdn-cgi/trace")
+        if api_ok and chatgpt_ok:
+            return {
+                "ready": True,
+                "label": "Proxy ready",
+                "detail": "ChatGPT login route is reachable.",
+                "mode": login_mode,
+            }
+        return {
+            "ready": False,
+            "label": "Codex blocked",
+            "detail": f"api.openai.com={api_detail}, chatgpt.com={chatgpt_detail}",
+            "mode": login_mode,
+        }
+
+    if api_ok:
+        return {
+            "ready": True,
+            "label": "Proxy ready",
+            "detail": "api.openai.com is reachable.",
+            "mode": login_mode,
+        }
+
+    return {
+        "ready": False,
+        "label": "Codex blocked",
+        "detail": f"api.openai.com={api_detail}",
+        "mode": login_mode,
+    }
+
+
 def proxy_status_payload() -> dict:
     configured = any((HTTP_PROXY, HTTPS_PROXY, ALL_PROXY))
     if not configured:
@@ -226,22 +310,29 @@ def proxy_status_payload() -> dict:
         }
 
     probe_state = read_openai_probe_state()
+    network = codex_network_payload()
     try:
         proxies = fetch_mihomo_proxies().get("proxies", {})
         current = (proxies.get("OpenAI") or {}).get("now", "")
-        ready = probe_state.get("status") == "ok"
+        ready = probe_state.get("status") == "ok" and network.get("ready", False)
+        detail_parts = []
+        if current:
+            detail_parts.append(current)
+        if network.get("detail"):
+            detail_parts.append(network["detail"])
+        detail = " | ".join(detail_parts)
         if ready:
             return {
                 "configured": True,
                 "ready": True,
-                "label": "Proxy ready",
-                "detail": current or probe_state.get("detail", ""),
+                "label": network.get("label", "Proxy ready"),
+                "detail": detail,
             }
         return {
             "configured": True,
             "ready": False,
-            "label": "Proxy warming",
-            "detail": current or probe_state.get("detail", "") or "OpenAI route is still probing.",
+            "label": network.get("label", "Proxy warming"),
+            "detail": detail or current or probe_state.get("detail", "") or "OpenAI route is still probing.",
         }
     except (URLError, TimeoutError, json.JSONDecodeError):
         return {
