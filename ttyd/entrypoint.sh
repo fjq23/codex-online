@@ -33,7 +33,7 @@ export STATE_DIR
 export TMUX_SESSION_PREFIX
 
 gosu codex python3 /opt/codex-workbench/api/server.py &
-gosu codex bash -lc 'if [ -n "${HTTP_PROXY:-}" ] || [ -n "${ALL_PROXY:-}" ]; then wb proxy-openai-bg 40; fi' >/dev/null 2>&1 &
+gosu codex bash -lc 'if [ -n "${HTTP_PROXY:-}" ] || [ -n "${ALL_PROXY:-}" ]; then wb proxy-openai-bg 40 --force; fi' >/dev/null 2>&1 &
 
 exec gosu codex ttyd \
   -p 7681 \

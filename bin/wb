@@ -10,6 +10,7 @@ RECENT_FILE="${STATE_DIR}/recent_workspace"
 SELECTED_FILE="${STATE_DIR}/selected_workspace"
 TMUX_SESSION_PREFIX="${TMUX_SESSION_PREFIX:-ws}"
 OPENAI_PROBE_TTL_SECONDS="${OPENAI_PROBE_TTL_SECONDS:-1800}"
+OPENAI_PROBE_RETRY_COOLDOWN_SECONDS="${OPENAI_PROBE_RETRY_COOLDOWN_SECONDS:-90}"
 TMUX_MAIN_WINDOW_NAME="${TMUX_MAIN_WINDOW_NAME:-main}"
 TMUX_RUN_WINDOW_NAME="${TMUX_RUN_WINDOW_NAME:-codex}"
 
@@ -379,6 +380,18 @@ openai_probe_recent() {
   [ "${age}" -lt "${OPENAI_PROBE_TTL_SECONDS}" ]
 }
 
+openai_probe_backoff_recent() {
+  local state_file age now mtime
+
+  state_file="$(openai_probe_state_file)"
+  [ -f "${state_file}" ] || return 1
+
+  now="$(date +%s)"
+  mtime="$(stat -c %Y "${state_file}" 2>/dev/null || echo 0)"
+  age=$((now - mtime))
+  [ "${age}" -lt "${OPENAI_PROBE_RETRY_COOLDOWN_SECONDS}" ]
+}
+
 openai_probe_lock_active() {
   local lock_dir pid_file pid=""
 
@@ -666,6 +679,7 @@ autoselect_openai_proxy() {
 
 schedule_openai_proxy_probe() {
   local limit="${1:-40}"
+  local force="${2:-false}"
   local lock_dir log_file
 
   ensure_base_layout
@@ -684,8 +698,14 @@ schedule_openai_proxy_probe() {
     clear_openai_probe_lock
   fi
 
-  if openai_probe_recent; then
-    return 0
+  if [ "${force}" != "true" ]; then
+    if openai_probe_recent; then
+      return 0
+    fi
+
+    if openai_probe_backoff_recent; then
+      return 0
+    fi
   fi
 
   (
@@ -957,9 +977,24 @@ cmd_proxy_openai() {
 
 cmd_proxy_openai_bg() {
   local limit="${1:-40}"
+  local force="false"
 
   ensure_base_layout
-  schedule_openai_proxy_probe "${limit}"
+
+  shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force)
+        force="true"
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  schedule_openai_proxy_probe "${limit}" "${force}"
 }
 
 cmd_pack() {

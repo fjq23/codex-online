@@ -422,6 +422,10 @@ h1 {
   background: #f2f2ec;
 }
 
+.key-row-scroll .key-button {
+  background: #eceff6;
+}
+
 .key-row-nav .key-button {
   min-width: 48px;
 }

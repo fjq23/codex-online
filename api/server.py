@@ -25,6 +25,8 @@ RECENT_FILE = STATE_DIR / "recent_workspace"
 SELECTED_FILE = STATE_DIR / "selected_workspace"
 INVALID_NAMES = {".", ".."}
 CPU_SNAPSHOT: tuple[int, int] | None = None
+AUTO_RECOVERY_COOLDOWN_SECONDS = int(os.environ.get("AUTO_RECOVERY_COOLDOWN_SECONDS", "90"))
+RECOVERY_TRIGGER_FILE = STATE_DIR / "proxy-recovery-last-trigger"
 SPECIAL_KEYS = {
     "Enter",
     "Escape",
@@ -164,6 +166,40 @@ def send_tmux_action(pane: str, mode: str, value: str) -> None:
     )
 
 
+def pane_in_mode(pane: str) -> bool:
+    result = subprocess.run(
+        ["tmux", "display-message", "-p", "-t", pane, "#{pane_in_mode}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() == "1"
+
+
+def send_tmux_scroll_action(pane: str, action: str) -> None:
+    if action == "page-up":
+        subprocess.run(["tmux", "copy-mode", "-t", pane], check=True, capture_output=True, text=True)
+        subprocess.run(["tmux", "send-keys", "-t", pane, "-X", "page-up"], check=True, capture_output=True, text=True)
+        return
+
+    if action == "page-down":
+        subprocess.run(["tmux", "copy-mode", "-t", pane], check=True, capture_output=True, text=True)
+        subprocess.run(["tmux", "send-keys", "-t", pane, "-X", "page-down"], check=True, capture_output=True, text=True)
+        return
+
+    if action == "top":
+        subprocess.run(["tmux", "copy-mode", "-t", pane], check=True, capture_output=True, text=True)
+        subprocess.run(["tmux", "send-keys", "-t", pane, "-X", "start-of-history"], check=True, capture_output=True, text=True)
+        return
+
+    if action in {"bottom", "live"}:
+        if pane_in_mode(pane):
+            subprocess.run(["tmux", "send-keys", "-t", pane, "-X", "cancel"], check=True, capture_output=True, text=True)
+        return
+
+    raise ValueError(f"Unsupported tmux action: {action}")
+
+
 def normalize_sequence(payload: dict) -> list[dict[str, str]]:
     if isinstance(payload.get("sequence"), list):
         raw_items = payload["sequence"]
@@ -290,6 +326,33 @@ def read_openai_probe_state() -> dict[str, str]:
     }
 
 
+def maybe_trigger_proxy_recovery(force: bool = False) -> None:
+    if not any((HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)):
+        return
+
+    now = int(time.time())
+    last_trigger = 0
+    if RECOVERY_TRIGGER_FILE.exists():
+        try:
+            last_trigger = int(RECOVERY_TRIGGER_FILE.read_text(encoding="utf-8").strip() or "0")
+        except ValueError:
+            last_trigger = 0
+
+    if not force and now - last_trigger < AUTO_RECOVERY_COOLDOWN_SECONDS:
+        return
+
+    RECOVERY_TRIGGER_FILE.write_text(f"{now}\n", encoding="utf-8")
+    subprocess.Popen(
+        [
+            "bash",
+            "-lc",
+            "PATH=$PATH:/opt/codex-workbench/bin wb proxy-openai-bg 40 --force >/dev/null 2>&1",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def fetch_mihomo_proxies() -> dict:
     with urlopen(f"{MIHOMO_CONTROLLER_URL}/proxies", timeout=2.5) as response:
         return json.loads(response.read().decode("utf-8"))
@@ -413,6 +476,16 @@ def proxy_status_payload() -> dict:
                 "label": network.get("label", "Proxy ready"),
                 "detail": detail,
             }
+        state_status = probe_state.get("status", "")
+        state_file = STATE_DIR / "openai-proxy-probe.state"
+        try:
+            state_age = max(0, int(time.time() - state_file.stat().st_mtime))
+        except FileNotFoundError:
+            state_age = AUTO_RECOVERY_COOLDOWN_SECONDS
+
+        if state_status != "running":
+            if state_status == "ok" or state_age >= AUTO_RECOVERY_COOLDOWN_SECONDS or not state_status:
+                maybe_trigger_proxy_recovery(force=True)
         return {
             "configured": True,
             "ready": False,
@@ -505,6 +578,33 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 return
 
             self.send_json({"ok": True, "workspace": workspace_name})
+            return
+
+        if path == "/api/terminal/tmux-action":
+            ensure_base_layout()
+            payload = self.read_json()
+            workspace_name = current_workspace_name(str(payload.get("workspace", "")))
+            if not workspace_name:
+                self.send_json({"error": "No workspace selected."}, HTTPStatus.CONFLICT)
+                return
+
+            pane = current_pane_for_workspace(workspace_name)
+            if not pane:
+                self.send_json({"error": "The workspace terminal is not attached yet."}, HTTPStatus.CONFLICT)
+                return
+
+            action = str(payload.get("action", "")).strip().lower()
+            try:
+                send_tmux_scroll_action(pane, action)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            except subprocess.CalledProcessError as error:
+                message = error.stderr.strip() or error.stdout.strip() or "Failed to control tmux."
+                self.send_json({"error": message}, HTTPStatus.BAD_GATEWAY)
+                return
+
+            self.send_json({"ok": True, "workspace": workspace_name, "action": action})
             return
 
         else:

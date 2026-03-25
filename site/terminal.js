@@ -68,6 +68,16 @@ const extraKeyRows = [
     ]
   },
   {
+    className: "key-row-scroll",
+    keys: [
+      { label: "PgUp", tmuxAction: "page-up", wide: true },
+      { label: "PgDn", tmuxAction: "page-down", wide: true },
+      { label: "Top", tmuxAction: "top" },
+      { label: "Bottom", tmuxAction: "bottom", wide: true },
+      { label: "Live", tmuxAction: "live", wide: true }
+    ]
+  },
+  {
     className: "key-row-nav",
     keys: [
       { label: "←", mode: "special", value: "Left" },
@@ -216,6 +226,24 @@ async function sendKeyPayload(payload) {
   focusTerminalFrame();
 }
 
+async function sendTmuxAction(action) {
+  const response = await fetch("/api/terminal/tmux-action", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ action })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to control tmux.");
+  }
+
+  setStatus(`tmux ${data.action}`, true);
+  focusTerminalFrame();
+}
+
 async function handlePaste() {
   if (!navigator.clipboard?.readText) {
     const fallbackText = window.prompt("Paste text to send into the terminal:", "");
@@ -261,6 +289,11 @@ function renderKeyButton(keyDef) {
   button.addEventListener("click", async () => {
     setStatus(`Sending ${keyDef.label}...`);
     try {
+      if (keyDef.tmuxAction) {
+        await sendTmuxAction(keyDef.tmuxAction);
+        return;
+      }
+
       if (keyDef.action === "paste") {
         await handlePaste();
         return;
