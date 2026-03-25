@@ -414,28 +414,11 @@ def codex_network_payload() -> dict:
             "mode": login_mode,
         }
 
-    if login_mode == "chatgpt":
-        chatgpt_ok, chatgpt_detail = probe_url_status("https://chatgpt.com/cdn-cgi/trace", reject_cf_challenge=True)
-        platform_ok, platform_detail = probe_url_status("https://platform.openai.com", reject_cf_challenge=True)
-        if api_ok and chatgpt_ok and platform_ok:
-            return {
-                "ready": True,
-                "label": "Proxy ready",
-                "detail": "ChatGPT login route is reachable.",
-                "mode": login_mode,
-            }
-        return {
-            "ready": False,
-            "label": "Codex blocked",
-            "detail": f"api.openai.com={api_detail}, chatgpt.com={chatgpt_detail}, platform.openai.com={platform_detail}",
-            "mode": login_mode,
-        }
-
     if api_ok:
         return {
             "ready": True,
             "label": "Proxy ready",
-            "detail": "api.openai.com is reachable.",
+            "detail": f"api.openai.com={api_detail}",
             "mode": login_mode,
         }
 
