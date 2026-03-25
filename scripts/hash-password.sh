@@ -7,5 +7,28 @@ if [ $# -ne 1 ]; then
   exit 1
 fi
 
-exec docker run --rm caddy:2 caddy hash-password --plaintext "$1"
+pick_docker_cmd() {
+  if docker info >/dev/null 2>&1; then
+    printf 'docker\n'
+    return 0
+  fi
 
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo -n docker info >/dev/null 2>&1; then
+      printf 'sudo docker\n'
+      return 0
+    fi
+
+    if sudo -v >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+      printf 'sudo docker\n'
+      return 0
+    fi
+  fi
+
+  echo "Cannot access Docker. Run with a user that can use Docker, or configure sudo for Docker." >&2
+  exit 1
+}
+
+DOCKER_CMD="$(pick_docker_cmd)"
+
+exec ${DOCKER_CMD} run --rm caddy:2 caddy hash-password --plaintext "$1"

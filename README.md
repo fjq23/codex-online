@@ -51,34 +51,31 @@
 
 ### 1. 准备环境变量
 
+优先用初始化脚本：
+
+```bash
+./scripts/init-env.sh --site codex.example.com --password '替换成强密码'
+```
+
+它会自动：
+
+- 复制 `.env.example` 到 `.env`（如果 `.env` 还不存在）
+- 生成 Caddy 的 bcrypt 哈希
+- 自动把哈希里的 `$` 转义成 `$$`
+- 写入 `BASIC_AUTH_USER`、`BASIC_AUTH_HASH`、`CADDY_SITE_ADDR`、端口、UID/GID、时区
+
+如果你是内网/IP 访问，也可以这样：
+
+```bash
+./scripts/init-env.sh --site :80 --http-port 8080 --https-port 8443 --password '替换成强密码'
+```
+
+如果你仍想手工处理，也可以继续用：
+
 ```bash
 cp .env.example .env
-```
-
-先生成 Basic Auth 密码哈希：
-
-```bash
 ./scripts/hash-password.sh '替换成强密码'
 ```
-
-把输出结果填入 `.env` 之前，先把哈希里的每个 `$` 替换成 `$$`，否则 `docker-compose` 会把它当成变量展开。
-
-例如：
-
-```text
-$2a$14$abc...
-```
-
-写入 `.env` 时要改成：
-
-```text
-$$2a$$14$$abc...
-```
-
-然后填写：
-
-- `BASIC_AUTH_USER`
-- `BASIC_AUTH_HASH`
 
 内网/IP 直连可保留：
 

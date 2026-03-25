@@ -21,11 +21,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background:
-    linear-gradient(135deg, rgba(16, 16, 16, 0.03) 0, rgba(16, 16, 16, 0.03) 1px, transparent 1px, transparent 24px),
-    linear-gradient(225deg, rgba(16, 16, 16, 0.03) 0, rgba(16, 16, 16, 0.03) 1px, transparent 1px, transparent 24px),
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.92), rgba(243, 241, 234, 1) 48%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: "IBM Plex Sans", "SF Pro Text", "PingFang SC", sans-serif;
 }
@@ -49,6 +45,7 @@ body {
 .hero {
   margin-bottom: 14px;
   padding: 18px 16px;
+  border-color: var(--line-strong);
 }
 
 .eyebrow {
@@ -93,7 +90,8 @@ h1 {
 }
 
 .action-card.primary {
-  background: var(--bg-card);
+  background: #101010;
+  color: #ffffff;
 }
 
 .action-label {
@@ -103,8 +101,7 @@ h1 {
 
 .action-hint,
 .panel-header span,
-.status,
-.copy-row span {
+.status {
   color: var(--muted);
 }
 
@@ -126,17 +123,6 @@ h1 {
   font-size: 1rem;
 }
 
-.path-list {
-  margin: 0;
-  padding-left: 18px;
-  line-height: 1.8;
-}
-
-.command-list {
-  display: grid;
-  gap: 12px;
-}
-
 .workspace-list {
   display: grid;
   gap: 10px;
@@ -155,6 +141,12 @@ h1 {
   color: inherit;
   cursor: pointer;
   box-shadow: var(--shadow);
+}
+
+.workspace-button:hover,
+.action-card:hover,
+.primary-button:hover {
+  border-color: var(--line-strong);
 }
 
 .workspace-button:active,
