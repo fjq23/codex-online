@@ -232,7 +232,7 @@ def codex_login_mode() -> str:
     return "unknown"
 
 
-def probe_url_status(url: str, timeout: float = 4.0) -> tuple[bool, str]:
+def probe_url_status(url: str, timeout: float = 4.0, reject_cf_challenge: bool = False) -> tuple[bool, str]:
     request = Request(
         url,
         headers={
@@ -242,8 +242,12 @@ def probe_url_status(url: str, timeout: float = 4.0) -> tuple[bool, str]:
     )
     try:
         with urlopen(request, timeout=timeout) as response:
+            if reject_cf_challenge and response.headers.get("cf-mitigated", "").lower() == "challenge":
+                return False, "cf-challenge"
             return True, str(response.getcode())
     except HTTPError as error:
+        if reject_cf_challenge and error.headers.get("cf-mitigated", "").lower() == "challenge":
+            return False, "cf-challenge"
         if error.code in {200, 204, 301, 302, 307, 308, 401, 403, 405}:
             return True, str(error.code)
         return False, f"http-{error.code}"
@@ -268,8 +272,9 @@ def codex_network_payload() -> dict:
         }
 
     if login_mode == "chatgpt":
-        chatgpt_ok, chatgpt_detail = probe_url_status("https://chatgpt.com/cdn-cgi/trace")
-        if api_ok and chatgpt_ok:
+        chatgpt_ok, chatgpt_detail = probe_url_status("https://chatgpt.com/cdn-cgi/trace", reject_cf_challenge=True)
+        platform_ok, platform_detail = probe_url_status("https://platform.openai.com", reject_cf_challenge=True)
+        if api_ok and chatgpt_ok and platform_ok:
             return {
                 "ready": True,
                 "label": "Proxy ready",
@@ -279,7 +284,7 @@ def codex_network_payload() -> dict:
         return {
             "ready": False,
             "label": "Codex blocked",
-            "detail": f"api.openai.com={api_detail}, chatgpt.com={chatgpt_detail}",
+            "detail": f"api.openai.com={api_detail}, chatgpt.com={chatgpt_detail}, platform.openai.com={platform_detail}",
             "mode": login_mode,
         }
 

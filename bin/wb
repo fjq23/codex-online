@@ -411,6 +411,23 @@ http_status_code() {
     "${url}" 2>/dev/null || true
 }
 
+http_headers() {
+  local url="$1"
+
+  curl -sS -D - -o /dev/null \
+    --connect-timeout 6 \
+    --max-time 12 \
+    "${url}" 2>/dev/null || true
+}
+
+http_header_status_code() {
+  awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}'
+}
+
+has_cf_challenge() {
+  grep -Eiq '^cf-mitigated:[[:space:]]*challenge'
+}
+
 urlencode() {
   python3 - "$1" <<'PY'
 import sys
@@ -499,14 +516,31 @@ openai_proxy_ok() {
     code="$(http_status_code "https://chatgpt.com/cdn-cgi/trace")"
     case "${code}" in
       200|204)
-        return 0
+        ;;
+      *)
+        return 1
         ;;
     esac
 
-    code="$(http_status_code "https://chatgpt.com")"
+    local headers=""
+
+    headers="$(http_headers "https://chatgpt.com")"
+    code="$(printf '%s\n' "${headers}" | http_header_status_code)"
     case "${code}" in
-      200|301|302|307|308|401|403|405)
-        return 0
+      200|301|302|307|308|401|405)
+        if ! printf '%s\n' "${headers}" | has_cf_challenge; then
+          return 0
+        fi
+        ;;
+    esac
+
+    headers="$(http_headers "https://platform.openai.com")"
+    code="$(printf '%s\n' "${headers}" | http_header_status_code)"
+    case "${code}" in
+      200|301|302|307|308|401|405)
+        if ! printf '%s\n' "${headers}" | has_cf_challenge; then
+          return 0
+        fi
         ;;
     esac
   fi
