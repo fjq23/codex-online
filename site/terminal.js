@@ -2,6 +2,10 @@ const workspaceNode = document.querySelector("#terminal-workspace");
 const keyStatusNode = document.querySelector("#terminal-key-status");
 const keyStripNode = document.querySelector("#key-strip");
 const frameNode = document.querySelector("#terminal-frame");
+const rootNode = document.documentElement;
+
+let lockedViewportHeight = 0;
+let lockedViewportWidth = 0;
 
 const extraKeyRows = [
   {
@@ -69,6 +73,40 @@ function setStatus(message, isOk = false) {
   }
   keyStatusNode.textContent = message;
   keyStatusNode.classList.toggle("ok", isOk);
+}
+
+function applyLockedViewport(width, height) {
+  lockedViewportWidth = width;
+  lockedViewportHeight = height;
+  rootNode.classList.remove("keyboard-open");
+  rootNode.style.setProperty("--app-height", `${height}px`);
+}
+
+function updateLockedViewport(force = false) {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  if (!lockedViewportHeight || !lockedViewportWidth || force) {
+    applyLockedViewport(width, height);
+    return;
+  }
+
+  const widthChanged = Math.abs(width - lockedViewportWidth) > 80;
+  const heightExpanded = height > lockedViewportHeight + 96;
+  const roughlySame = Math.abs(height - lockedViewportHeight) < 80;
+  const likelyKeyboardShrink = height < lockedViewportHeight - 120;
+
+  if (widthChanged || heightExpanded || roughlySame) {
+    applyLockedViewport(width, height);
+    return;
+  }
+
+  if (likelyKeyboardShrink) {
+    rootNode.classList.add("keyboard-open");
+    return;
+  }
+
+  rootNode.classList.remove("keyboard-open");
 }
 
 async function fetchWorkspaces() {
@@ -203,5 +241,28 @@ frameNode?.addEventListener("load", () => {
   setStatus("Terminal ready.", true);
 });
 
+window.addEventListener("resize", () => {
+  updateLockedViewport(false);
+});
+
+window.visualViewport?.addEventListener("resize", () => {
+  updateLockedViewport(false);
+});
+
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(() => {
+    rootNode.classList.remove("keyboard-open");
+    updateLockedViewport(true);
+  }, 120);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    rootNode.classList.remove("keyboard-open");
+    updateLockedViewport(true);
+  }
+});
+
+updateLockedViewport(true);
 renderExtraKeys();
 updateWorkspaceTitle();
