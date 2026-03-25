@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 import hashlib
+from urllib.error import URLError
+from urllib.request import urlopen
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +15,10 @@ WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
 WORKSPACES_DIR = Path(os.environ.get("WORKSPACES_DIR", str(WORKSPACE_DIR / "workspaces")))
 STATE_DIR = Path(os.environ.get("STATE_DIR", str(WORKSPACE_DIR / ".state")))
 TMUX_SESSION_PREFIX = os.environ.get("TMUX_SESSION_PREFIX", "ws")
+HTTP_PROXY = os.environ.get("HTTP_PROXY", "")
+HTTPS_PROXY = os.environ.get("HTTPS_PROXY", "")
+ALL_PROXY = os.environ.get("ALL_PROXY", "")
+MIHOMO_CONTROLLER_URL = os.environ.get("MIHOMO_CONTROLLER_URL", "http://mihomo:9090")
 RECENT_FILE = STATE_DIR / "recent_workspace"
 SELECTED_FILE = STATE_DIR / "selected_workspace"
 INVALID_NAMES = {".", ".."}
@@ -191,6 +197,61 @@ def list_workspaces() -> list[str]:
     return sorted(path.name for path in WORKSPACES_DIR.iterdir() if path.is_dir())
 
 
+def read_openai_probe_state() -> dict[str, str]:
+    state_file = STATE_DIR / "openai-proxy-probe.state"
+    if not state_file.exists():
+        return {"status": "idle", "detail": ""}
+
+    parts = state_file.read_text(encoding="utf-8").strip().split("\t", 2)
+    return {
+        "timestamp": parts[0] if len(parts) > 0 else "",
+        "status": parts[1] if len(parts) > 1 else "idle",
+        "detail": parts[2] if len(parts) > 2 else "",
+    }
+
+
+def fetch_mihomo_proxies() -> dict:
+    with urlopen(f"{MIHOMO_CONTROLLER_URL}/proxies", timeout=2.5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def proxy_status_payload() -> dict:
+    configured = any((HTTP_PROXY, HTTPS_PROXY, ALL_PROXY))
+    if not configured:
+        return {
+            "configured": False,
+            "ready": True,
+            "label": "Direct mode",
+            "detail": "No outbound proxy configured.",
+        }
+
+    probe_state = read_openai_probe_state()
+    try:
+        proxies = fetch_mihomo_proxies().get("proxies", {})
+        current = (proxies.get("OpenAI") or {}).get("now", "")
+        ready = probe_state.get("status") == "ok"
+        if ready:
+            return {
+                "configured": True,
+                "ready": True,
+                "label": "Proxy ready",
+                "detail": current or probe_state.get("detail", ""),
+            }
+        return {
+            "configured": True,
+            "ready": False,
+            "label": "Proxy warming",
+            "detail": current or probe_state.get("detail", "") or "OpenAI route is still probing.",
+        }
+    except (URLError, TimeoutError, json.JSONDecodeError):
+        return {
+            "configured": True,
+            "ready": False,
+            "label": "Proxy offline",
+            "detail": "Cannot reach the Mihomo controller.",
+        }
+
+
 class WorkspaceHandler(BaseHTTPRequestHandler):
     server_version = "workspace-api/1.0"
 
@@ -222,6 +283,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 "workspaces": list_workspaces(),
                 "recent": read_state(RECENT_FILE),
                 "selected": read_state(SELECTED_FILE),
+                "proxy": proxy_status_payload(),
             }
         )
 

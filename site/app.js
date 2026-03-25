@@ -3,6 +3,9 @@ const summaryNode = document.querySelector("#workspace-summary");
 const workspaceStatusNode = document.querySelector("#workspace-status");
 const formNode = document.querySelector("#workspace-form");
 const inputNode = document.querySelector("#workspace-name");
+const proxyLabelNode = document.querySelector("#proxy-label");
+const proxyDetailNode = document.querySelector("#proxy-detail");
+const proxyChipNode = document.querySelector("#proxy-chip");
 
 function setWorkspaceStatus(message, isOk = false) {
   if (!workspaceStatusNode) {
@@ -17,6 +20,18 @@ function workspaceServiceMessage(status) {
     return "Workspace service is unavailable. Restart caddy and ttyd.";
   }
   return "";
+}
+
+function updateProxyStatus(proxy = {}) {
+  if (!proxyLabelNode || !proxyDetailNode || !proxyChipNode) {
+    return;
+  }
+
+  proxyLabelNode.textContent = proxy.label || "Unavailable";
+  proxyDetailNode.textContent = proxy.detail || "";
+  proxyChipNode.classList.toggle("ready", Boolean(proxy.ready));
+  proxyChipNode.classList.toggle("pending", proxy.configured && !proxy.ready);
+  proxyChipNode.classList.toggle("direct", proxy.configured === false);
 }
 
 async function fetchWorkspaces() {
@@ -77,6 +92,7 @@ async function refreshWorkspaces() {
     const workspaces = payload.workspaces || [];
     const recent = payload.recent || "";
     const selected = payload.selected || "";
+    updateProxyStatus(payload.proxy || {});
 
     listNode.innerHTML = "";
 
@@ -103,6 +119,7 @@ async function refreshWorkspaces() {
     });
   } catch (error) {
     summaryNode.textContent = "Unavailable";
+    updateProxyStatus({ label: "Unavailable", detail: "Workspace service is unavailable." });
     setWorkspaceStatus(error.message || "Failed to load workspaces.");
   }
 }

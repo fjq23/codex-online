@@ -73,6 +73,51 @@ h1 {
   line-height: 1.55;
 }
 
+.hero-statusbar {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card);
+}
+
+.status-chip-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-chip.ready {
+  background: #edf7f2;
+  border-color: #0b7a54;
+}
+
+.status-chip.pending {
+  background: #f8f2e7;
+  border-color: #8c6a2b;
+}
+
+.status-chip.direct {
+  background: #f1f1ec;
+}
+
+.status-chip-detail {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .actions {
   margin: 0 0 14px;
 }

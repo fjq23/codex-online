@@ -10,6 +10,8 @@ RECENT_FILE="${STATE_DIR}/recent_workspace"
 SELECTED_FILE="${STATE_DIR}/selected_workspace"
 TMUX_SESSION_PREFIX="${TMUX_SESSION_PREFIX:-ws}"
 OPENAI_PROBE_TTL_SECONDS="${OPENAI_PROBE_TTL_SECONDS:-1800}"
+TMUX_MAIN_WINDOW_NAME="${TMUX_MAIN_WINDOW_NAME:-main}"
+TMUX_RUN_WINDOW_NAME="${TMUX_RUN_WINDOW_NAME:-codex}"
 
 ensure_base_layout() {
   mkdir -p "${WORKSPACES_DIR}" "${STATE_DIR}"
@@ -230,11 +232,59 @@ attach_workspace_session() {
   fi
 
   if [ -n "${TMUX:-}" ]; then
-    tmux new-session -d -s "${session}" -n main -c "${dir}"
+    tmux new-session -d -s "${session}" -n "${TMUX_MAIN_WINDOW_NAME}" -c "${dir}"
     tmux switch-client -t "${session}"
   else
-    tmux new-session -s "${session}" -n main -c "${dir}"
+    tmux new-session -s "${session}" -n "${TMUX_MAIN_WINDOW_NAME}" -c "${dir}"
   fi
+}
+
+ensure_main_window() {
+  local session="$1"
+  local dir="$2"
+
+  if ! tmux list-windows -t "${session}" -F '#{window_name}' 2>/dev/null | grep -Fxq "${TMUX_MAIN_WINDOW_NAME}"; then
+    tmux new-window -d -t "${session}" -n "${TMUX_MAIN_WINDOW_NAME}" -c "${dir}"
+  fi
+}
+
+replace_run_window() {
+  local session="$1"
+  local dir="$2"
+  local command="$3"
+
+  if tmux list-windows -t "${session}" -F '#{window_name}' 2>/dev/null | grep -Fxq "${TMUX_RUN_WINDOW_NAME}"; then
+    tmux kill-window -t "${session}:${TMUX_RUN_WINDOW_NAME}" >/dev/null 2>&1 || true
+  fi
+
+  tmux new-window -d -t "${session}" -n "${TMUX_RUN_WINDOW_NAME}" -c "${dir}" "${command}"
+}
+
+tidy_workspace_session() {
+  local workspace_name="$1"
+  local dir session
+  local -a windows=()
+  local window=""
+
+  dir="$(workspace_dir "${workspace_name}")"
+  session="$(session_name_for "${workspace_name}")"
+
+  if ! tmux has-session -t "${session}" 2>/dev/null; then
+    echo "No tmux session for ${workspace_name}" >&2
+    return 1
+  fi
+
+  ensure_main_window "${session}" "${dir}"
+  mapfile -t windows < <(tmux list-windows -t "${session}" -F '#{window_name}')
+  for window in "${windows[@]}"; do
+    case "${window}" in
+      "${TMUX_MAIN_WINDOW_NAME}"|"${TMUX_RUN_WINDOW_NAME}")
+        ;;
+      *)
+        tmux kill-window -t "${session}:${window}" >/dev/null 2>&1 || true
+        ;;
+    esac
+  done
 }
 
 workspace_from_context_or_recent() {
@@ -592,7 +642,7 @@ schedule_openai_proxy_probe() {
 run_codex() {
   local workspace_name="$1"
   local user_prompt="$2"
-  local dir log_dir stamp prompt_file runner_file log_file window_name session
+  local dir log_dir stamp prompt_file runner_file log_file session
 
   ensure_workspace_dir "${workspace_name}"
   ensure_logs_dir "${workspace_name}"
@@ -604,7 +654,6 @@ run_codex() {
   prompt_file="${log_dir}/prompt-${stamp}.txt"
   runner_file="${log_dir}/run-codex-${stamp}.sh"
   log_file="${log_dir}/codex-${stamp}.log"
-  window_name="run-${stamp}"
   session="$(session_name_for "${workspace_name}")"
 
   cat > "${prompt_file}" <<EOF
@@ -641,18 +690,14 @@ EOF
 
   chmod 0755 "${runner_file}"
 
-  if tmux has-session -t "${session}" 2>/dev/null; then
-    tmux new-window -t "${session}" -n "${window_name}" -c "${dir}" "bash ${runner_file@Q}"
-    if [ -n "${TMUX:-}" ]; then
-      tmux switch-client -t "${session}"
-      tmux select-window -t "${session}:${window_name}"
-    else
-      tmux attach-session -t "${session}"
-    fi
-    return 0
+  if ! tmux has-session -t "${session}" 2>/dev/null; then
+    tmux new-session -d -s "${session}" -n "${TMUX_MAIN_WINDOW_NAME}" -c "${dir}"
   fi
 
-  tmux new-session -d -s "${session}" -n "${window_name}" -c "${dir}" "bash ${runner_file@Q}"
+  ensure_main_window "${session}" "${dir}"
+  tidy_workspace_session "${workspace_name}" >/dev/null 2>&1 || true
+  replace_run_window "${session}" "${dir}" "bash ${runner_file@Q}"
+  tmux select-window -t "${session}:${TMUX_RUN_WINDOW_NAME}"
   if [ -n "${TMUX:-}" ]; then
     tmux switch-client -t "${session}"
   else
@@ -859,6 +904,26 @@ cmd_pack() {
   pack_workspace "${workspace_name}"
 }
 
+cmd_tidy() {
+  local workspace_name=""
+
+  ensure_base_layout
+
+  if [ $# -gt 0 ]; then
+    workspace_name="$(resolve_workspace_name "$1")"
+  else
+    workspace_name="$(workspace_from_context_or_recent "" || true)"
+  fi
+
+  if [ -z "${workspace_name}" ]; then
+    echo "No current or recent workspace. Open /terminal first." >&2
+    exit 1
+  fi
+
+  tidy_workspace_session "${workspace_name}"
+  echo "Tidied tmux windows for ${workspace_name}"
+}
+
 cmd_help() {
   cat <<'EOF'
 Usage:
@@ -873,6 +938,7 @@ Usage:
   wb proxy-openai [limit]
   wb proxy-openai-bg [limit]
   wb pack [name]
+  wb tidy [name]
   wb help
 EOF
 }
@@ -920,6 +986,10 @@ main() {
     pack)
       shift || true
       cmd_pack "$@"
+      ;;
+    tidy)
+      shift || true
+      cmd_tidy "$@"
       ;;
     help|-h|--help)
       cmd_help

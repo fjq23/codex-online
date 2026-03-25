@@ -20,5 +20,6 @@ alias recent='wb recent'
 alias menu='wb menu'
 alias resume_last='codex resume --last'
 alias openws='wb open'
+alias tidy='wb tidy'
 
 PS1='[codex:\w]\$ '
