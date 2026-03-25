@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 import hashlib
+import shutil
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from http import HTTPStatus
@@ -22,6 +24,7 @@ MIHOMO_CONTROLLER_URL = os.environ.get("MIHOMO_CONTROLLER_URL", "http://mihomo:9
 RECENT_FILE = STATE_DIR / "recent_workspace"
 SELECTED_FILE = STATE_DIR / "selected_workspace"
 INVALID_NAMES = {".", ".."}
+CPU_SNAPSHOT: tuple[int, int] | None = None
 SPECIAL_KEYS = {
     "Enter",
     "Escape",
@@ -195,6 +198,83 @@ def normalize_sequence(payload: dict) -> list[dict[str, str]]:
 def list_workspaces() -> list[str]:
     ensure_base_layout()
     return sorted(path.name for path in WORKSPACES_DIR.iterdir() if path.is_dir())
+
+
+def read_cpu_times() -> tuple[int, int]:
+    with open("/proc/stat", "r", encoding="utf-8") as handle:
+        parts = handle.readline().split()
+    values = [int(item) for item in parts[1:]]
+    idle = values[3] + values[4]
+    total = sum(values)
+    return total, idle
+
+
+def cpu_percent() -> float:
+    global CPU_SNAPSHOT
+    total, idle = read_cpu_times()
+    if CPU_SNAPSHOT is None:
+      CPU_SNAPSHOT = (total, idle)
+      return 0.0
+
+    prev_total, prev_idle = CPU_SNAPSHOT
+    CPU_SNAPSHOT = (total, idle)
+    total_delta = total - prev_total
+    idle_delta = idle - prev_idle
+    if total_delta <= 0:
+        return 0.0
+    return round(max(0.0, min(100.0, 100.0 * (1.0 - (idle_delta / total_delta)))), 1)
+
+
+def memory_status() -> dict:
+    values: dict[str, int] = {}
+    with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+        for line in handle:
+            key, raw_value = line.split(":", 1)
+            values[key] = int(raw_value.strip().split()[0]) * 1024
+
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", 0)
+    used = max(0, total - available)
+    percent = round((used / total) * 100, 1) if total else 0.0
+    gib = 1024 ** 3
+    return {
+        "percent": percent,
+        "used_gb": round(used / gib, 1),
+        "total_gb": round(total / gib, 1),
+    }
+
+
+def disk_status() -> dict:
+    usage = shutil.disk_usage(str(WORKSPACE_DIR if WORKSPACE_DIR.exists() else Path("/")))
+    percent = round((usage.used / usage.total) * 100, 1) if usage.total else 0.0
+    gib = 1024 ** 3
+    return {
+        "percent": percent,
+        "used_gb": round(usage.used / gib, 1),
+        "total_gb": round(usage.total / gib, 1),
+    }
+
+
+def uptime_hours() -> float:
+    with open("/proc/uptime", "r", encoding="utf-8") as handle:
+        seconds = float(handle.read().split()[0])
+    return round(seconds / 3600.0, 1)
+
+
+def system_status_payload() -> dict:
+    load1, load5, load15 = os.getloadavg()
+    return {
+        "cpu_percent": cpu_percent(),
+        "memory": memory_status(),
+        "disk": disk_status(),
+        "load": {
+            "one": round(load1, 2),
+            "five": round(load5, 2),
+            "fifteen": round(load15, 2),
+        },
+        "uptime_hours": uptime_hours(),
+        "timestamp": int(time.time()),
+    }
 
 
 def read_openai_probe_state() -> dict[str, str]:
@@ -380,6 +460,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 "recent": read_state(RECENT_FILE),
                 "selected": read_state(SELECTED_FILE),
                 "proxy": proxy_status_payload(),
+                "system": system_status_payload(),
             }
         )
 

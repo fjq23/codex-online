@@ -2,15 +2,32 @@ const workspaceNode = document.querySelector("#terminal-workspace");
 const keyStatusNode = document.querySelector("#terminal-key-status");
 const keyStripNode = document.querySelector("#key-strip");
 const frameNode = document.querySelector("#terminal-frame");
+const frameShellNode = document.querySelector("#terminal-frame-shell");
+const topbarNode = document.querySelector(".terminal-topbar");
+const terminalKeysNode = document.querySelector(".terminal-keys");
+const syncButtonNode = document.querySelector("#sync-terminal");
+const terminalCpuNode = document.querySelector("#terminal-system-cpu");
+const terminalMemoryNode = document.querySelector("#terminal-system-memory");
+const terminalDiskNode = document.querySelector("#terminal-system-disk");
+const terminalLoadNode = document.querySelector("#terminal-system-load");
 const rootNode = document.documentElement;
 
 let lockedViewportHeight = 0;
 let lockedViewportWidth = 0;
+let lockedFrameHeight = 0;
 
 const extraKeyRows = [
   {
     className: "key-row-control",
     keys: [
+      {
+        label: "Codex",
+        wide: true,
+        sequence: [
+          { mode: "literal", value: "codex" },
+          { mode: "special", value: "Enter" }
+        ]
+      },
       { label: "Esc", mode: "special", value: "Escape" },
       { label: "Tab", mode: "special", value: "Tab" },
       { label: "Enter", mode: "special", value: "Enter" },
@@ -75,11 +92,23 @@ function setStatus(message, isOk = false) {
   keyStatusNode.classList.toggle("ok", isOk);
 }
 
+function measureFrameHeight(height) {
+  if (!topbarNode || !terminalKeysNode) {
+    return Math.max(height - 180, 240);
+  }
+
+  const topbarHeight = Math.ceil(topbarNode.getBoundingClientRect().height);
+  const keysHeight = Math.ceil(terminalKeysNode.getBoundingClientRect().height);
+  return Math.max(height - topbarHeight - keysHeight, 240);
+}
+
 function applyLockedViewport(width, height) {
   lockedViewportWidth = width;
   lockedViewportHeight = height;
+  lockedFrameHeight = measureFrameHeight(height);
   rootNode.classList.remove("keyboard-open");
   rootNode.style.setProperty("--app-height", `${height}px`);
+  rootNode.style.setProperty("--terminal-frame-height", `${lockedFrameHeight}px`);
 }
 
 function updateLockedViewport(force = false) {
@@ -126,15 +155,47 @@ async function updateWorkspaceTitle() {
     const payload = await fetchWorkspaces();
     const selected = payload.selected || payload.recent || "";
     workspaceNode.textContent = selected || "No workspace selected";
+    updateSystemStatus(payload.system || {});
   } catch (error) {
     workspaceNode.textContent = "Workspace unavailable";
     setStatus(error.message || "Failed to load workspace.", false);
   }
 }
 
+function updateSystemStatus(system = {}) {
+  if (!terminalCpuNode || !terminalMemoryNode || !terminalDiskNode || !terminalLoadNode) {
+    return;
+  }
+
+  const memory = system.memory || {};
+  const disk = system.disk || {};
+  const load = system.load || {};
+
+  terminalCpuNode.textContent = typeof system.cpu_percent === "number"
+    ? `CPU ${system.cpu_percent.toFixed(1)}%`
+    : "CPU --";
+  terminalMemoryNode.textContent = typeof memory.percent === "number"
+    ? `Mem ${memory.percent.toFixed(1)}%`
+    : "Mem --";
+  terminalDiskNode.textContent = typeof disk.percent === "number"
+    ? `Disk ${disk.percent.toFixed(1)}%`
+    : "Disk --";
+  terminalLoadNode.textContent = typeof load.one === "number"
+    ? `Load ${load.one.toFixed(2)}`
+    : "Load --";
+}
+
 function focusTerminalFrame() {
   frameNode?.focus();
   frameNode?.contentWindow?.focus();
+}
+
+function syncTerminalViewport(reloadFrame = true) {
+  updateLockedViewport(true);
+  if (reloadFrame && frameNode) {
+    setStatus("Syncing terminal...", false);
+    frameNode.src = "/terminal/session/";
+  }
 }
 
 async function sendKeyPayload(payload) {
@@ -239,6 +300,7 @@ function renderExtraKeys() {
 
 frameNode?.addEventListener("load", () => {
   setStatus("Terminal ready.", true);
+  updateLockedViewport(true);
 });
 
 window.addEventListener("resize", () => {
@@ -252,7 +314,7 @@ window.visualViewport?.addEventListener("resize", () => {
 window.addEventListener("orientationchange", () => {
   window.setTimeout(() => {
     rootNode.classList.remove("keyboard-open");
-    updateLockedViewport(true);
+    syncTerminalViewport(true);
   }, 120);
 });
 
@@ -260,9 +322,15 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     rootNode.classList.remove("keyboard-open");
     updateLockedViewport(true);
+    updateWorkspaceTitle();
   }
+});
+
+syncButtonNode?.addEventListener("click", () => {
+  syncTerminalViewport(true);
 });
 
 updateLockedViewport(true);
 renderExtraKeys();
 updateWorkspaceTitle();
+window.setInterval(updateWorkspaceTitle, 10000);

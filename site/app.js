@@ -6,6 +6,10 @@ const inputNode = document.querySelector("#workspace-name");
 const proxyLabelNode = document.querySelector("#proxy-label");
 const proxyDetailNode = document.querySelector("#proxy-detail");
 const proxyChipNode = document.querySelector("#proxy-chip");
+const systemCpuNode = document.querySelector("#system-cpu");
+const systemMemoryNode = document.querySelector("#system-memory");
+const systemDiskNode = document.querySelector("#system-disk");
+const systemLoadNode = document.querySelector("#system-load");
 
 function setWorkspaceStatus(message, isOk = false) {
   if (!workspaceStatusNode) {
@@ -32,6 +36,25 @@ function updateProxyStatus(proxy = {}) {
   proxyChipNode.classList.toggle("ready", Boolean(proxy.ready));
   proxyChipNode.classList.toggle("pending", proxy.configured && !proxy.ready);
   proxyChipNode.classList.toggle("direct", proxy.configured === false);
+}
+
+function updateSystemStatus(system = {}) {
+  if (!systemCpuNode || !systemMemoryNode || !systemDiskNode || !systemLoadNode) {
+    return;
+  }
+
+  const memory = system.memory || {};
+  const disk = system.disk || {};
+  const load = system.load || {};
+
+  systemCpuNode.textContent = typeof system.cpu_percent === "number" ? `${system.cpu_percent.toFixed(1)}%` : "--";
+  systemMemoryNode.textContent = typeof memory.percent === "number"
+    ? `${memory.percent.toFixed(1)}%`
+    : "--";
+  systemDiskNode.textContent = typeof disk.percent === "number"
+    ? `${disk.percent.toFixed(1)}%`
+    : "--";
+  systemLoadNode.textContent = typeof load.one === "number" ? load.one.toFixed(2) : "--";
 }
 
 async function fetchWorkspaces() {
@@ -93,6 +116,7 @@ async function refreshWorkspaces() {
     const recent = payload.recent || "";
     const selected = payload.selected || "";
     updateProxyStatus(payload.proxy || {});
+    updateSystemStatus(payload.system || {});
 
     listNode.innerHTML = "";
 
@@ -120,6 +144,7 @@ async function refreshWorkspaces() {
   } catch (error) {
     summaryNode.textContent = "Unavailable";
     updateProxyStatus({ label: "Unavailable", detail: "Workspace service is unavailable." });
+    updateSystemStatus({});
     setWorkspaceStatus(error.message || "Failed to load workspaces.");
   }
 }
@@ -141,3 +166,4 @@ formNode?.addEventListener("submit", async (event) => {
 });
 
 refreshWorkspaces();
+window.setInterval(refreshWorkspaces, 10000);
