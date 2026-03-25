@@ -29,7 +29,11 @@ SPECIAL_KEYS = {
     "Delete",
     "C-c",
     "C-d",
+    "C-a",
+    "C-e",
     "C-l",
+    "C-u",
+    "C-w",
     "C-z",
 }
 

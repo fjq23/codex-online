@@ -289,23 +289,38 @@ h1 {
 
 .key-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
+.key-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.key-row::-webkit-scrollbar {
+  display: none;
+}
+
 .key-button {
-  min-height: 46px;
-  padding: 0 10px;
+  min-height: 42px;
+  min-width: 52px;
+  padding: 0 12px;
   border: 1px solid var(--line-strong);
   background: var(--bg-card);
   color: var(--text);
   font: inherit;
   font-weight: 600;
+  white-space: nowrap;
+  flex: 0 0 auto;
   cursor: pointer;
 }
 
 .key-button-wide {
-  grid-column: span 2;
+  min-width: 78px;
 }
 
 .key-button:active,
@@ -313,10 +328,17 @@ h1 {
   transform: translateY(1px);
 }
 
-@media (max-width: 420px) {
-  .key-strip {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
+.key-row-control .key-button {
+  background: #111111;
+  color: #ffffff;
+}
+
+.key-row-edit .key-button {
+  background: #f2f2ec;
+}
+
+.key-row-nav .key-button {
+  min-width: 48px;
 }
 
 @media (min-width: 720px) {

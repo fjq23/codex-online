@@ -3,45 +3,64 @@ const keyStatusNode = document.querySelector("#terminal-key-status");
 const keyStripNode = document.querySelector("#key-strip");
 const frameNode = document.querySelector("#terminal-frame");
 
-const extraKeys = [
-  { label: "Esc", mode: "special", value: "Escape" },
-  { label: "Tab", mode: "special", value: "Tab" },
-  { label: "Enter", mode: "special", value: "Enter" },
-  { label: "Ctrl+C", mode: "special", value: "C-c", wide: true },
-  { label: "Ctrl+D", mode: "special", value: "C-d", wide: true },
-  { label: "Ctrl+L", mode: "special", value: "C-l", wide: true },
-  { label: "Up", mode: "special", value: "Up" },
-  { label: "Left", mode: "special", value: "Left" },
-  { label: "Down", mode: "special", value: "Down" },
-  { label: "Right", mode: "special", value: "Right" },
-  { label: "/", mode: "literal", value: "/" },
-  { label: "-", mode: "literal", value: "-" },
-  { label: "_", mode: "literal", value: "_" },
-  { label: ":", mode: "literal", value: ":" },
-  { label: "|", mode: "literal", value: "|" },
+const extraKeyRows = [
   {
-    label: "[]",
-    sequence: [
-      { mode: "literal", value: "[]" },
-      { mode: "special", value: "Left" }
+    className: "key-row-control",
+    keys: [
+      { label: "Esc", mode: "special", value: "Escape" },
+      { label: "Tab", mode: "special", value: "Tab" },
+      { label: "Enter", mode: "special", value: "Enter" },
+      { label: "Ctrl+C", mode: "special", value: "C-c", wide: true },
+      { label: "Ctrl+D", mode: "special", value: "C-d", wide: true },
+      { label: "Ctrl+L", mode: "special", value: "C-l", wide: true },
+      { label: "Paste", action: "paste", wide: true }
     ]
   },
   {
-    label: "()",
-    sequence: [
-      { mode: "literal", value: "()" },
-      { mode: "special", value: "Left" }
+    className: "key-row-edit",
+    keys: [
+      { label: "Ctrl+A", mode: "special", value: "C-a", wide: true },
+      { label: "Ctrl+E", mode: "special", value: "C-e", wide: true },
+      { label: "Ctrl+W", mode: "special", value: "C-w", wide: true },
+      { label: "Ctrl+U", mode: "special", value: "C-u", wide: true },
+      {
+        label: "[]",
+        sequence: [
+          { mode: "literal", value: "[]" },
+          { mode: "special", value: "Left" }
+        ]
+      },
+      {
+        label: "()",
+        sequence: [
+          { mode: "literal", value: "()" },
+          { mode: "special", value: "Left" }
+        ]
+      },
+      {
+        label: "{}",
+        sequence: [
+          { mode: "literal", value: "{}" },
+          { mode: "special", value: "Left" }
+        ]
+      }
     ]
   },
   {
-    label: "{}",
-    sequence: [
-      { mode: "literal", value: "{}" },
-      { mode: "special", value: "Left" }
+    className: "key-row-nav",
+    keys: [
+      { label: "←", mode: "special", value: "Left" },
+      { label: "↓", mode: "special", value: "Down" },
+      { label: "↑", mode: "special", value: "Up" },
+      { label: "→", mode: "special", value: "Right" },
+      { label: "/", mode: "literal", value: "/" },
+      { label: "-", mode: "literal", value: "-" },
+      { label: "_", mode: "literal", value: "_" },
+      { label: ":", mode: "literal", value: ":" },
+      { label: "|", mode: "literal", value: "|" },
+      { label: "~", mode: "literal", value: "~" }
     ]
-  },
-  { label: "~", mode: "literal", value: "~" },
-  { label: "Paste", action: "paste", wide: true }
+  }
 ];
 
 function setStatus(message, isOk = false) {
@@ -160,14 +179,23 @@ function renderKeyButton(keyDef) {
   return button;
 }
 
+function renderKeyRow(rowDef) {
+  const row = document.createElement("div");
+  row.className = `key-row ${rowDef.className || ""}`.trim();
+  rowDef.keys.forEach((keyDef) => {
+    row.appendChild(renderKeyButton(keyDef));
+  });
+  return row;
+}
+
 function renderExtraKeys() {
   if (!keyStripNode) {
     return;
   }
 
   keyStripNode.innerHTML = "";
-  extraKeys.forEach((keyDef) => {
-    keyStripNode.appendChild(renderKeyButton(keyDef));
+  extraKeyRows.forEach((rowDef) => {
+    keyStripNode.appendChild(renderKeyRow(rowDef));
   });
 }
 
