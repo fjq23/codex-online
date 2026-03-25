@@ -1,0 +1,50 @@
+{
+	admin off
+}
+
+{$CADDY_SITE_ADDR} {
+	encode zstd gzip
+
+	route {
+		basic_auth bcrypt "Codex Workbench Sign In" {
+			{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+		}
+
+		root * /srv/site
+
+		@api path /api/*
+		handle @api {
+			reverse_proxy ttyd:8081
+		}
+
+		@terminal_session_root path /terminal/session
+		handle @terminal_session_root {
+			redir /terminal/session/ 302
+		}
+
+		@terminal_session path /terminal/session/*
+		handle @terminal_session {
+			reverse_proxy ttyd:7681
+		}
+
+		@terminal_page path /terminal /terminal/
+		handle @terminal_page {
+			redir / 302
+		}
+
+		@files path /files /files/*
+		handle @files {
+			reverse_proxy filebrowser:80
+		}
+
+		@home path / /home
+		handle @home {
+			rewrite * /index.html
+			file_server
+		}
+
+		handle {
+			file_server
+		}
+	}
+}

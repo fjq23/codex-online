@@ -1,0 +1,58 @@
+# Copy this file to `proxy/mihomo/config.yaml` and replace it with your real Mihomo/Clash config.
+# This template is intentionally minimal so the service can start without privileged TUN mode.
+
+mixed-port: 7890
+socks-port: 7891
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+external-controller: 0.0.0.0:9090
+
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  nameserver:
+    - 1.1.1.1
+    - 8.8.8.8
+
+proxies:
+  # Replace this section with your own nodes or providers.
+  # Example:
+  # - name: my-node
+  #   type: ss
+  #   server: 1.2.3.4
+  #   port: 443
+  #   cipher: aes-128-gcm
+  #   password: replace-me
+
+proxy-groups:
+  - name: Default
+    type: url-test
+    proxies:
+      # - my-node
+    url: "https://www.gstatic.com/generate_204"
+    interval: 600
+  - name: OpenAI
+    type: url-test
+    proxies:
+      # - my-node-us
+      # - my-node-jp
+    url: "https://chatgpt.com/cdn-cgi/trace"
+    interval: 600
+    expected-status: 200
+
+rules:
+  - DOMAIN-SUFFIX,openai.com,OpenAI
+  - DOMAIN-SUFFIX,chat.openai.com,OpenAI
+  - DOMAIN-SUFFIX,auth0.openai.com,OpenAI
+  - DOMAIN-SUFFIX,chatgpt.com,OpenAI
+  - DOMAIN-SUFFIX,platform.openai.com,OpenAI
+  - DOMAIN-SUFFIX,oaistatic.com,OpenAI
+  - DOMAIN-SUFFIX,oaiusercontent.com,OpenAI
+  - DOMAIN-SUFFIX,cdn.auth0.com,OpenAI
+  - DOMAIN-SUFFIX,challenges.cloudflare.com,OpenAI
+  - DOMAIN-SUFFIX,sentry.io,OpenAI
+  - MATCH,Default

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    >
+    <title>Codex Mobile Workbench</title>
+    <meta
+      name="description"
+      content="A lightweight, phone-first Codex workbench."
+    >
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero panel">
+        <p class="eyebrow">Codex Mobile Workbench</p>
+        <h1>Workspaces and files.</h1>
+        <p class="lead">
+          Open a workspace, drop into its terminal, then switch to files when you need uploads or downloads.
+        </p>
+      </section>
+
+      <section class="actions" aria-label="main actions">
+        <a class="action-card primary" href="/files/">
+          <span class="action-label">Open Files</span>
+          <span class="action-hint">Browse workspaces, upload inputs, download outputs</span>
+        </a>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Workspaces</h2>
+          <span id="workspace-summary">Loading...</span>
+        </div>
+        <div class="workspace-list" id="workspace-list"></div>
+        <p class="status" id="workspace-status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Create New</h2>
+          <span>English or Chinese names are both fine</span>
+        </div>
+        <form class="workspace-create" id="workspace-form">
+          <label class="field-label" for="workspace-name">Workspace name</label>
+          <input
+            id="workspace-name"
+            name="workspace-name"
+            type="text"
+            placeholder="demo or 测试"
+            autocomplete="off"
+          >
+          <button class="primary-button" type="submit">Create and Open Terminal</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

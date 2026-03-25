@@ -1,0 +1,28 @@
+.env
+__pycache__/
+*.pyc
+
+# Runtime data
+/data/caddy/*
+!/data/caddy/.gitkeep
+/data/caddy_config/*
+!/data/caddy_config/.gitkeep
+/data/codex-home/*
+!/data/codex-home/.gitkeep
+/data/filebrowser/*
+!/data/filebrowser/.gitkeep
+
+# Workspace runtime content
+/workspace/.state/*
+!/workspace/.state/.gitkeep
+/workspace/workspaces/*
+!/workspace/workspaces/.gitkeep
+
+# Local proxy runtime config
+/proxy/mihomo/config.yaml
+/proxy/mihomo/providers/*
+/proxy/mihomo/providers/.gitkeep
+/proxy/mihomo/*.db
+/proxy/mihomo/*.mmdb
+/proxy/mihomo/*.dat
+/proxy/mihomo/bin/mihomo

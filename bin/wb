@@ -1,0 +1,934 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 027
+
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+WORKSPACES_DIR="${WORKSPACES_DIR:-${WORKSPACE_DIR}/workspaces}"
+STATE_DIR="${STATE_DIR:-${WORKSPACE_DIR}/.state}"
+RECENT_FILE="${STATE_DIR}/recent_workspace"
+SELECTED_FILE="${STATE_DIR}/selected_workspace"
+TMUX_SESSION_PREFIX="${TMUX_SESSION_PREFIX:-ws}"
+OPENAI_PROBE_TTL_SECONDS="${OPENAI_PROBE_TTL_SECONDS:-1800}"
+
+ensure_base_layout() {
+  mkdir -p "${WORKSPACES_DIR}" "${STATE_DIR}"
+}
+
+openai_probe_lock_dir() {
+  printf '%s\n' "${STATE_DIR}/openai-proxy-probe.lock"
+}
+
+openai_probe_log_file() {
+  printf '%s\n' "${STATE_DIR}/openai-proxy-probe.log"
+}
+
+openai_probe_state_file() {
+  printf '%s\n' "${STATE_DIR}/openai-proxy-probe.state"
+}
+
+openai_probe_pid_file() {
+  printf '%s\n' "$(openai_probe_lock_dir)/pid"
+}
+
+slugify_ascii() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//'
+}
+
+normalize_workspace_name() {
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+raw = sys.argv[1].strip()
+if not raw or raw in {".", ".."}:
+    raise SystemExit(1)
+
+ascii_name = re.sub(r"[^a-z0-9._-]+", "-", raw.lower()).strip("-")
+if ascii_name and not ascii_name.startswith("."):
+    print(ascii_name)
+    raise SystemExit(0)
+
+cleaned = re.sub(r"\s+", "-", raw)
+cleaned = re.sub(r"[\x00-\x1f\x7f/\\\\]+", "-", cleaned)
+cleaned = cleaned.strip(" .-")
+if not cleaned or cleaned in {".", ".."} or cleaned.startswith("."):
+    raise SystemExit(1)
+
+print(cleaned)
+PY
+}
+
+session_name_for() {
+  local safe hash
+
+  safe="$(printf '%s' "$1" | sed -E 's/[^A-Za-z0-9_-]+/_/g; s/^_+//; s/_+$//')"
+  [ -n "${safe}" ] || safe="workspace"
+  hash="$(printf '%s' "$1" | sha256sum | cut -c1-8)"
+  printf '%s_%s_%s\n' "${TMUX_SESSION_PREFIX}" "${safe}" "${hash}"
+}
+
+workspace_dir() {
+  printf '%s/%s\n' "${WORKSPACES_DIR}" "$1"
+}
+
+workspace_exists() {
+  [ -d "$(workspace_dir "$1")" ]
+}
+
+read_state_file() {
+  local file="$1"
+  if [ -f "${file}" ]; then
+    tr -d '\r\n' < "${file}"
+  fi
+}
+
+recent_workspace() {
+  read_state_file "${RECENT_FILE}"
+}
+
+selected_workspace() {
+  read_state_file "${SELECTED_FILE}"
+}
+
+remember_workspace() {
+  printf '%s\n' "$1" > "${RECENT_FILE}"
+  printf '%s\n' "$1" > "${SELECTED_FILE}"
+}
+
+list_workspaces() {
+  if [ ! -d "${WORKSPACES_DIR}" ]; then
+    return 0
+  fi
+
+  find "${WORKSPACES_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+}
+
+current_workspace() {
+  case "${PWD}" in
+    "${WORKSPACES_DIR}/"*)
+      local rest
+      rest="${PWD#${WORKSPACES_DIR}/}"
+      printf '%s\n' "${rest%%/*}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+resolve_workspace_name() {
+  local raw="${1:-}"
+  local safe=""
+
+  if [ -z "${raw}" ]; then
+    return 1
+  fi
+
+  if workspace_exists "${raw}"; then
+    printf '%s\n' "${raw}"
+    return 0
+  fi
+
+  safe="$(normalize_workspace_name "${raw}" || true)"
+  if [ -z "${safe}" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "${safe}"
+}
+
+ensure_workspace_dir() {
+  local name="$1"
+  local dir
+
+  dir="$(workspace_dir "${name}")"
+  mkdir -p "${dir}"
+}
+
+ensure_logs_dir() {
+  local name="$1"
+  mkdir -p "$(workspace_dir "${name}")/logs"
+}
+
+ensure_archive_dir() {
+  local name="$1"
+  mkdir -p "$(workspace_dir "${name}")/archive"
+}
+
+pick_workspace_interactive() {
+  local recent="${1:-}"
+  local choice=""
+  local index=1
+  local name=""
+  local selected=""
+  local -a workspaces=()
+
+  mapfile -t workspaces < <(list_workspaces)
+
+  echo >&2
+  echo "Workspace Picker" >&2
+  if [ -n "${recent}" ] && workspace_exists "${recent}"; then
+    echo "Press Enter to open the recent workspace: ${recent}" >&2
+  fi
+
+  if [ "${#workspaces[@]}" -gt 0 ]; then
+    echo "Existing workspaces:" >&2
+    for name in "${workspaces[@]}"; do
+      printf '  %d. %s\n' "${index}" "${name}" >&2
+      index=$((index + 1))
+    done
+  else
+    echo "No workspace yet. Type a name to create one." >&2
+  fi
+
+  echo "Type a number or a workspace name." >&2
+
+  while true; do
+    read -r -p "Workspace> " choice
+
+    if [ -z "${choice}" ]; then
+      if [ -n "${recent}" ] && workspace_exists "${recent}"; then
+        printf '%s\n' "${recent}"
+        return 0
+      fi
+      echo "No recent workspace yet." >&2
+      continue
+    fi
+
+    if [[ "${choice}" =~ ^[0-9]+$ ]] && [ "${choice}" -ge 1 ] && [ "${choice}" -le "${#workspaces[@]}" ]; then
+      printf '%s\n' "${workspaces[$((choice - 1))]}"
+      return 0
+    fi
+
+    selected="$(resolve_workspace_name "${choice}" || true)"
+    if [ -n "${selected}" ]; then
+      printf '%s\n' "${selected}"
+      return 0
+    fi
+
+    echo "Invalid workspace name." >&2
+  done
+}
+
+attach_workspace_session() {
+  local name="$1"
+  local dir session
+
+  ensure_workspace_dir "${name}"
+  remember_workspace "${name}"
+
+  dir="$(workspace_dir "${name}")"
+  session="$(session_name_for "${name}")"
+
+  if tmux has-session -t "${session}" 2>/dev/null; then
+    if [ -n "${TMUX:-}" ]; then
+      tmux switch-client -t "${session}"
+    else
+      tmux attach-session -t "${session}"
+    fi
+    return 0
+  fi
+
+  if [ -n "${TMUX:-}" ]; then
+    tmux new-session -d -s "${session}" -n main -c "${dir}"
+    tmux switch-client -t "${session}"
+  else
+    tmux new-session -s "${session}" -n main -c "${dir}"
+  fi
+}
+
+workspace_from_context_or_recent() {
+  local explicit="${1:-}"
+  local name=""
+
+  if [ -n "${explicit}" ]; then
+    resolve_workspace_name "${explicit}"
+    return 0
+  fi
+
+  if name="$(current_workspace 2>/dev/null)"; then
+    printf '%s\n' "${name}"
+    return 0
+  fi
+
+  if name="$(selected_workspace 2>/dev/null)" && [ -n "${name}" ] && workspace_exists "${name}"; then
+    printf '%s\n' "${name}"
+    return 0
+  fi
+
+  if name="$(recent_workspace 2>/dev/null)" && [ -n "${name}" ] && workspace_exists "${name}"; then
+    printf '%s\n' "${name}"
+    return 0
+  fi
+
+  return 1
+}
+
+prompt_for_codex_request() {
+  local text=""
+
+  read -r -p "Prompt> " text
+  if [ -z "${text}" ]; then
+    echo "A prompt is required." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${text}"
+}
+
+mihomo_controller_url() {
+  printf '%s\n' "${MIHOMO_CONTROLLER_URL:-http://mihomo:9090}"
+}
+
+current_mihomo_group_member() {
+  local group="$1"
+
+  curl -fsS --max-time 5 "$(mihomo_controller_url)/proxies" |
+    jq -r --arg group "${group}" '.proxies[$group].now // empty' 2>/dev/null || true
+}
+
+write_openai_probe_state() {
+  local status="$1"
+  local detail="${2:-}"
+
+  printf '%s\t%s\t%s\n' "$(date -Iseconds)" "${status}" "${detail}" > "$(openai_probe_state_file)"
+}
+
+openai_probe_recent() {
+  local state_file age now mtime status
+
+  state_file="$(openai_probe_state_file)"
+  [ -f "${state_file}" ] || return 1
+
+  status="$(awk -F '\t' 'NR==1 {print $2}' "${state_file}" 2>/dev/null || true)"
+  [ "${status}" = "ok" ] || return 1
+
+  now="$(date +%s)"
+  mtime="$(stat -c %Y "${state_file}" 2>/dev/null || echo 0)"
+  age=$((now - mtime))
+  [ "${age}" -lt "${OPENAI_PROBE_TTL_SECONDS}" ]
+}
+
+openai_probe_lock_active() {
+  local lock_dir pid_file pid=""
+
+  lock_dir="$(openai_probe_lock_dir)"
+  pid_file="$(openai_probe_pid_file)"
+
+  [ -d "${lock_dir}" ] || return 1
+  [ -f "${pid_file}" ] || return 1
+
+  pid="$(cat "${pid_file}" 2>/dev/null || true)"
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null
+}
+
+clear_openai_probe_lock() {
+  rm -f "$(openai_probe_pid_file)" >/dev/null 2>&1 || true
+  rmdir "$(openai_probe_lock_dir)" >/dev/null 2>&1 || true
+}
+
+mihomo_controller_ready() {
+  curl -fsS --max-time 3 "$(mihomo_controller_url)/version" >/dev/null 2>&1
+}
+
+http_status_code() {
+  local url="$1"
+
+  curl -sS -o /dev/null -w '%{http_code}' \
+    --connect-timeout 6 \
+    --max-time 12 \
+    "${url}" 2>/dev/null || true
+}
+
+urlencode() {
+  python3 - "$1" <<'PY'
+import sys
+import urllib.parse
+
+print(urllib.parse.quote(sys.argv[1], safe=""))
+PY
+}
+
+rank_proxy_candidates_parallel() {
+  local controller_url="$1"
+  local probe_url="${2:-https://chatgpt.com/cdn-cgi/trace}"
+  local timeout_ms="${3:-8000}"
+  local max_workers="${4:-8}"
+  local candidates_json=""
+
+  candidates_json="$(jq -Rsc 'split("\n") | map(select(length > 0))')"
+
+  CANDIDATES_JSON="${candidates_json}" python3 - "$controller_url" "$probe_url" "$timeout_ms" "$max_workers" <<'PY'
+import concurrent.futures
+import json
+import os
+import sys
+import urllib.parse
+import urllib.request
+
+controller = sys.argv[1].rstrip("/")
+probe_url = sys.argv[2]
+timeout_ms = int(sys.argv[3])
+max_workers = int(sys.argv[4])
+
+candidates = json.loads(os.environ.get("CANDIDATES_JSON", "[]"))
+
+def probe(name: str):
+    encoded_name = urllib.parse.quote(name, safe="")
+    encoded_url = urllib.parse.quote(probe_url, safe="")
+    url = f"{controller}/proxies/{encoded_name}/delay?url={encoded_url}&timeout={timeout_ms}"
+    try:
+      with urllib.request.urlopen(url, timeout=(timeout_ms / 1000.0) + 2.0) as response:
+        payload = json.load(response)
+      delay = payload.get("delay")
+      if isinstance(delay, int) and delay >= 0:
+        return delay, name
+    except Exception:
+      return None
+    return None
+
+results = []
+with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+    futures = [pool.submit(probe, name) for name in candidates]
+    for future in concurrent.futures.as_completed(futures):
+        result = future.result()
+        if result is not None:
+            results.append(result)
+
+for delay, name in sorted(results):
+    print(f"{delay}\t{name}")
+PY
+}
+
+openai_proxy_ok() {
+  local code=""
+
+  code="$(http_status_code "https://api.openai.com/v1/models")"
+  case "${code}" in
+    200|301|302|307|308|401|403|405)
+      return 0
+      ;;
+  esac
+
+  code="$(http_status_code "https://platform.openai.com")"
+  case "${code}" in
+    200|301|302|307|308|401|403|405)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+select_mihomo_group() {
+  local group="$1"
+  local candidate="$2"
+  local payload=""
+
+  payload="$(jq -nc --arg name "${candidate}" '{name:$name}')"
+  curl -fsS -X PUT "$(mihomo_controller_url)/proxies/${group}" \
+    -H 'Content-Type: application/json' \
+    --data "${payload}" >/dev/null
+}
+
+autoselect_openai_proxy() {
+  local group="${1:-OpenAI}"
+  local limit="${2:-40}"
+  local current=""
+  local candidate=""
+  local tested=0
+  local -a candidates=()
+  local -a preferred=()
+  local -a fallback=()
+  local -a ranked_lines=()
+  local -a ranked_candidates=()
+  local line=""
+  local delay=""
+  local name=""
+
+  if ! mihomo_controller_ready; then
+    echo "Mihomo controller is unavailable; skipping OpenAI proxy probe." >&2
+    return 1
+  fi
+
+  current="$(curl -fsS --max-time 5 "$(mihomo_controller_url)/proxies" | jq -r --arg group "${group}" '.proxies[$group].now // empty' 2>/dev/null || true)"
+
+  if [ -n "${current}" ] && openai_proxy_ok; then
+    echo "OpenAI proxy already works: ${current}" >&2
+    return 0
+  fi
+
+  mapfile -t candidates < <(
+    curl -fsS --max-time 5 "$(mihomo_controller_url)/proxies" |
+      jq -r --arg group "${group}" '.proxies[$group].all[]? // empty' 2>/dev/null
+  )
+
+  if [ "${#candidates[@]}" -eq 0 ]; then
+    echo "No candidates available in Mihomo group: ${group}" >&2
+    return 1
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    case "${candidate}" in
+      "🔰 节点选择"|"🎯 全球直连"|"♻️ 自动选择")
+        continue
+        ;;
+    esac
+
+    if printf '%s' "${candidate}" | grep -Eq '(负载均衡|恢复|剩余|国内中转)'; then
+      continue
+    fi
+
+    if printf '%s' "${candidate}" | grep -Eq '(California|美国|Japan|日本|Taiwan|台湾|Singapore|新加坡|UK|英国|Germany|德国|Korea|韩国|Malaysia|马来西亚|Australia|澳大利亚)'; then
+      preferred+=("${candidate}")
+    else
+      fallback+=("${candidate}")
+    fi
+  done
+
+  candidates=("${preferred[@]}" "${fallback[@]}")
+
+  if [ "${#candidates[@]}" -gt 0 ]; then
+    mapfile -t ranked_lines < <(
+      printf '%s\n' "${candidates[@]}" |
+        rank_proxy_candidates_parallel "$(mihomo_controller_url)" "https://chatgpt.com/cdn-cgi/trace" 8000 8
+    )
+  fi
+
+  if [ "${#ranked_lines[@]}" -gt 0 ]; then
+    ranked_candidates=()
+    for line in "${ranked_lines[@]}"; do
+      delay="${line%%$'\t'*}"
+      name="${line#*$'\t'}"
+      [ -n "${name}" ] || continue
+      printf 'Parallel probe ok: %sms %s\n' "${delay}" "${name}" >&2
+      ranked_candidates+=("${name}")
+    done
+
+    if [ "${#ranked_candidates[@]}" -gt 0 ]; then
+      candidates=("${ranked_candidates[@]}")
+    fi
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [ -n "${current}" ] && [ "${candidate}" = "${current}" ]; then
+      continue
+    fi
+
+    tested=$((tested + 1))
+    if [ "${limit}" -gt 0 ] && [ "${tested}" -gt "${limit}" ]; then
+      break
+    fi
+
+    echo "Trying OpenAI proxy [${tested}/${limit}]: ${candidate}" >&2
+    if ! select_mihomo_group "${group}" "${candidate}"; then
+      continue
+    fi
+
+    sleep 2
+    if openai_proxy_ok; then
+      echo "Selected working OpenAI proxy: ${candidate}" >&2
+      return 0
+    fi
+  done
+
+  echo "No working OpenAI proxy found after testing ${tested} candidates." >&2
+  return 1
+}
+
+schedule_openai_proxy_probe() {
+  local limit="${1:-40}"
+  local lock_dir log_file
+
+  ensure_base_layout
+
+  if [ -z "${HTTP_PROXY:-}" ] && [ -z "${ALL_PROXY:-}" ]; then
+    return 0
+  fi
+
+  lock_dir="$(openai_probe_lock_dir)"
+  log_file="$(openai_probe_log_file)"
+
+  if [ -d "${lock_dir}" ]; then
+    if openai_probe_lock_active; then
+      return 0
+    fi
+    clear_openai_probe_lock
+  fi
+
+  if openai_probe_recent; then
+    return 0
+  fi
+
+  (
+    set +e
+    umask 077
+
+    mkdir "${lock_dir}" 2>/dev/null || exit 0
+    printf '%s\n' "$$" > "$(openai_probe_pid_file)"
+    trap 'clear_openai_probe_lock' EXIT
+
+    {
+      echo "[$(date -Iseconds)] background OpenAI proxy probe started"
+      write_openai_probe_state "running" "background-probe"
+
+      for _ in 1 2 3 4 5; do
+        if mihomo_controller_ready; then
+          break
+        fi
+        sleep 2
+      done
+
+      if autoselect_openai_proxy OpenAI "${limit}"; then
+        write_openai_probe_state "ok" "$(current_mihomo_group_member OpenAI)"
+      else
+        write_openai_probe_state "failed" "$(current_mihomo_group_member OpenAI)"
+      fi
+    } >> "${log_file}" 2>&1
+  ) &
+}
+
+run_codex() {
+  local workspace_name="$1"
+  local user_prompt="$2"
+  local dir log_dir stamp prompt_file runner_file log_file window_name session
+
+  ensure_workspace_dir "${workspace_name}"
+  ensure_logs_dir "${workspace_name}"
+  remember_workspace "${workspace_name}"
+
+  dir="$(workspace_dir "${workspace_name}")"
+  log_dir="${dir}/logs"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  prompt_file="${log_dir}/prompt-${stamp}.txt"
+  runner_file="${log_dir}/run-codex-${stamp}.sh"
+  log_file="${log_dir}/codex-${stamp}.log"
+  window_name="run-${stamp}"
+  session="$(session_name_for "${workspace_name}")"
+
+  cat > "${prompt_file}" <<EOF
+Workspace name: ${workspace_name}
+Workspace root: ${dir}
+
+This workspace starts empty by design.
+Use the existing folder structure if present, or create any folders you need.
+Keep final deliverables inside the workspace.
+
+User request:
+${user_prompt}
+EOF
+
+  cat > "${runner_file}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd $(printf '%q' "${dir}")
+echo "[workspace] ${workspace_name}"
+echo "[cwd] ${dir}"
+echo "[prompt] ${prompt_file}"
+echo "[log] ${log_file}"
+echo
+
+codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -C $(printf '%q' "${dir}") - < $(printf '%q' "${prompt_file}") 2>&1 | tee -a $(printf '%q' "${log_file}")
+status=\${PIPESTATUS[0]}
+
+echo
+echo "[codex exit code] \${status}" | tee -a $(printf '%q' "${log_file}")
+echo "[workspace] ${dir}"
+exec bash --login
+EOF
+
+  chmod 0755 "${runner_file}"
+
+  if tmux has-session -t "${session}" 2>/dev/null; then
+    tmux new-window -t "${session}" -n "${window_name}" -c "${dir}" "bash ${runner_file@Q}"
+    if [ -n "${TMUX:-}" ]; then
+      tmux switch-client -t "${session}"
+      tmux select-window -t "${session}:${window_name}"
+    else
+      tmux attach-session -t "${session}"
+    fi
+    return 0
+  fi
+
+  tmux new-session -d -s "${session}" -n "${window_name}" -c "${dir}" "bash ${runner_file@Q}"
+  if [ -n "${TMUX:-}" ]; then
+    tmux switch-client -t "${session}"
+  else
+    tmux attach-session -t "${session}"
+  fi
+}
+
+pack_workspace() {
+  local workspace_name="$1"
+  local dir archive_dir stamp archive_name tmp_zip
+
+  ensure_workspace_dir "${workspace_name}"
+  ensure_archive_dir "${workspace_name}"
+  dir="$(workspace_dir "${workspace_name}")"
+  archive_dir="${dir}/archive"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+
+  if [ -d "${dir}/output" ] && find "${dir}/output" -mindepth 1 -print -quit | grep -q .; then
+    archive_name="${workspace_name}-output-${stamp}.zip"
+    tmp_zip="/tmp/${archive_name}"
+    rm -f "${tmp_zip}"
+    (
+      cd "${dir}"
+      zip -r "${tmp_zip}" output >/dev/null
+    )
+  else
+    archive_name="${workspace_name}-workspace-${stamp}.zip"
+    tmp_zip="/tmp/${archive_name}"
+    rm -f "${tmp_zip}"
+    (
+      cd "${dir}"
+      zip -r "${tmp_zip}" . -x 'archive/*' 'logs/*' >/dev/null
+    )
+  fi
+
+  mv "${tmp_zip}" "${archive_dir}/${archive_name}"
+  echo "Created archive: ${archive_dir}/${archive_name}"
+}
+
+cmd_menu() {
+  local recent name
+
+  ensure_base_layout
+  recent="$(recent_workspace 2>/dev/null || true)"
+  name="$(pick_workspace_interactive "${recent}")"
+  attach_workspace_session "${name}"
+}
+
+cmd_open() {
+  local name=""
+
+  ensure_base_layout
+  if [ $# -gt 0 ]; then
+    name="$(resolve_workspace_name "$1")"
+  else
+    name="$(pick_workspace_interactive "$(recent_workspace 2>/dev/null || true)")"
+  fi
+
+  attach_workspace_session "${name}"
+}
+
+cmd_new() {
+  local raw="${1:-}"
+  local name=""
+
+  ensure_base_layout
+
+  if [ -z "${raw}" ]; then
+    read -r -p "New workspace name> " raw
+  fi
+
+  name="$(resolve_workspace_name "${raw}")"
+  attach_workspace_session "${name}"
+}
+
+cmd_recent() {
+  local name=""
+
+  ensure_base_layout
+  name="$(recent_workspace 2>/dev/null || true)"
+  if [ -z "${name}" ] || ! workspace_exists "${name}"; then
+    echo "No recent workspace. Open /terminal first." >&2
+    exit 1
+  fi
+
+  attach_workspace_session "${name}"
+}
+
+cmd_attach_selected() {
+  local name=""
+  local count=0
+
+  ensure_base_layout
+
+  name="$(selected_workspace 2>/dev/null || true)"
+  if [ -z "${name}" ] || ! workspace_exists "${name}"; then
+    name="$(recent_workspace 2>/dev/null || true)"
+  fi
+
+  if [ -z "${name}" ] || ! workspace_exists "${name}"; then
+    count="$(list_workspaces | wc -l | tr -d '[:space:]')"
+    if [ "${count}" = "1" ]; then
+      name="$(list_workspaces | head -n 1)"
+    fi
+  fi
+
+  if [ -z "${name}" ] || ! workspace_exists "${name}"; then
+    echo "No workspace selected. Open /terminal first." >&2
+    exec bash --login
+  fi
+
+  schedule_openai_proxy_probe 40
+  attach_workspace_session "${name}"
+}
+
+cmd_list() {
+  ensure_base_layout
+  list_workspaces
+}
+
+cmd_run() {
+  local workspace_name=""
+  local prompt=""
+
+  ensure_base_layout
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --workspace)
+        [ $# -ge 2 ] || { echo "--workspace requires a value" >&2; exit 1; }
+        workspace_name="$(resolve_workspace_name "$2")"
+        shift 2
+        ;;
+      -h|--help)
+        cmd_help
+        return 0
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [ -z "${workspace_name}" ]; then
+    workspace_name="$(workspace_from_context_or_recent "${workspace_name}" || true)"
+  fi
+
+  if [ -z "${workspace_name}" ]; then
+    echo "No current workspace. Open /terminal first." >&2
+    exit 1
+  fi
+
+  if [ $# -gt 0 ]; then
+    prompt="$*"
+  else
+    prompt="$(prompt_for_codex_request)"
+  fi
+
+  if [ -n "${HTTP_PROXY:-}" ] || [ -n "${ALL_PROXY:-}" ]; then
+    schedule_openai_proxy_probe 40
+    if ! openai_proxy_ok; then
+      echo "OpenAI is not reachable through the current proxy. Probing other candidates..." >&2
+      autoselect_openai_proxy OpenAI 40 || echo "OpenAI proxy probe failed; continuing with the current selection." >&2
+    fi
+  fi
+
+  run_codex "${workspace_name}" "${prompt}"
+}
+
+cmd_proxy_openai() {
+  local limit="${1:-40}"
+
+  ensure_base_layout
+  autoselect_openai_proxy OpenAI "${limit}"
+}
+
+cmd_proxy_openai_bg() {
+  local limit="${1:-40}"
+
+  ensure_base_layout
+  schedule_openai_proxy_probe "${limit}"
+}
+
+cmd_pack() {
+  local workspace_name=""
+
+  ensure_base_layout
+
+  if [ $# -gt 0 ]; then
+    workspace_name="$(resolve_workspace_name "$1")"
+  else
+    workspace_name="$(workspace_from_context_or_recent "" || true)"
+  fi
+
+  if [ -z "${workspace_name}" ]; then
+    echo "No current or recent workspace. Open /terminal first." >&2
+    exit 1
+  fi
+
+  pack_workspace "${workspace_name}"
+}
+
+cmd_help() {
+  cat <<'EOF'
+Usage:
+  wb                  open the CLI workspace picker
+  wb menu             open the CLI workspace picker
+  wb open [name]      open or create a workspace
+  wb new [name]       create and open a workspace
+  wb recent           open the most recent workspace
+  wb attach-selected  attach the selected/recent workspace
+  wb list             list workspaces
+  wb run [--workspace <name>] ["prompt"]
+  wb proxy-openai [limit]
+  wb proxy-openai-bg [limit]
+  wb pack [name]
+  wb help
+EOF
+}
+
+main() {
+  local subcommand="${1:-menu}"
+
+  case "${subcommand}" in
+    menu)
+      shift || true
+      cmd_menu "$@"
+      ;;
+    open)
+      shift || true
+      cmd_open "$@"
+      ;;
+    new)
+      shift || true
+      cmd_new "$@"
+      ;;
+    recent)
+      shift || true
+      cmd_recent "$@"
+      ;;
+    attach-selected)
+      shift || true
+      cmd_attach_selected "$@"
+      ;;
+    list)
+      shift || true
+      cmd_list "$@"
+      ;;
+    run)
+      shift || true
+      cmd_run "$@"
+      ;;
+    proxy-openai)
+      shift || true
+      cmd_proxy_openai "$@"
+      ;;
+    proxy-openai-bg)
+      shift || true
+      cmd_proxy_openai_bg "$@"
+      ;;
+    pack)
+      shift || true
+      cmd_pack "$@"
+      ;;
+    help|-h|--help)
+      cmd_help
+      ;;
+    *)
+      cmd_help >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

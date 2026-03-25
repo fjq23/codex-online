@@ -1,0 +1,24 @@
+export PATH="$PATH:/usr/local/bin:/opt/codex-workbench/bin"
+export WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+export WORKSPACES_DIR="${WORKSPACES_DIR:-${WORKSPACE_DIR}/workspaces}"
+export STATE_DIR="${STATE_DIR:-${WORKSPACE_DIR}/.state}"
+export CODEX_HOME="${CODEX_HOME:-/codex-home}"
+
+# Keep tmux-created shells inside their workspace directory.
+case "${PWD:-}" in
+  "${WORKSPACES_DIR}/"*)
+    ;;
+  *)
+    cd "${WORKSPACE_DIR}"
+    ;;
+esac
+
+alias ll='ls -alF'
+alias ws='cd "${WORKSPACE_DIR}"'
+alias w='wb'
+alias recent='wb recent'
+alias menu='wb menu'
+alias resume_last='codex resume --last'
+alias openws='wb open'
+
+PS1='[codex:\w]\$ '
