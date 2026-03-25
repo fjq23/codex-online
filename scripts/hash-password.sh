@@ -7,6 +7,8 @@ if [ $# -ne 1 ]; then
   exit 1
 fi
 
+CADDY_IMAGE="${CADDY_IMAGE:-caddy:2}"
+
 pick_docker_cmd() {
   if docker info >/dev/null 2>&1; then
     printf 'docker\n'
@@ -31,4 +33,4 @@ pick_docker_cmd() {
 
 DOCKER_CMD="$(pick_docker_cmd)"
 
-exec ${DOCKER_CMD} run --rm caddy:2 caddy hash-password --plaintext "$1"
+exec ${DOCKER_CMD} run --rm "${CADDY_IMAGE}" caddy hash-password --plaintext "$1"

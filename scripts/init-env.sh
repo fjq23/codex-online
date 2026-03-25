@@ -36,6 +36,7 @@ Options:
 Examples:
   ./scripts/init-env.sh --site codex.example.com --password 'change-me'
   ./scripts/init-env.sh --site :80 --http-port 8080 --https-port 8443 --password 'change-me'
+  CADDY_IMAGE=docker.m.daocloud.io/library/caddy:2 ./scripts/init-env.sh --site :80 --http-port 80 --password 'change-me'
 EOF
 }
 

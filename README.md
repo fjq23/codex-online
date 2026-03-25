@@ -77,6 +77,12 @@ cp .env.example .env
 ./scripts/hash-password.sh '替换成强密码'
 ```
 
+如果服务器访问 Docker Hub 很慢，可以直接让初始化脚本走 DaoCloud 镜像：
+
+```bash
+CADDY_IMAGE=docker.m.daocloud.io/library/caddy:2 ./scripts/init-env.sh --site :80 --http-port 80 --password '替换成强密码'
+```
+
 内网/IP 直连可保留：
 
 ```dotenv
