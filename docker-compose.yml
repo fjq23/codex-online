@@ -6,12 +6,12 @@ services:
       - ttyd
       - filebrowser
     environment:
-      CADDY_SITE_ADDR: ${CADDY_SITE_ADDR:-:80}
+      CADDY_SITE_ADDR: ${CADDY_SITE_ADDR}
       BASIC_AUTH_USER: ${BASIC_AUTH_USER}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
     ports:
-      - "${HTTP_PORT:-8080}:80"
-      - "${HTTPS_PORT:-8443}:443"
+      - "${HTTP_PORT}:80"
+      - "${HTTPS_PORT}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./site:/srv/site:ro
@@ -22,30 +22,30 @@ services:
     build:
       context: ./ttyd
       args:
-        CODEX_VERSION: ${CODEX_VERSION:-0.116.0}
-        HTTP_PROXY: ${HTTP_PROXY:-}
-        HTTPS_PROXY: ${HTTPS_PROXY:-}
-        ALL_PROXY: ${ALL_PROXY:-}
-        NO_PROXY: ${NO_PROXY:-}
+        CODEX_VERSION: ${CODEX_VERSION}
+        HTTP_PROXY: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        ALL_PROXY: ${ALL_PROXY}
+        NO_PROXY: ${NO_PROXY}
     restart: unless-stopped
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      APP_UID: ${APP_UID:-1000}
-      APP_GID: ${APP_GID:-1000}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TZ: ${TZ}
+      APP_UID: ${APP_UID}
+      APP_GID: ${APP_GID}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       CODEX_HOME: /codex-home
       WORKSPACE_DIR: /workspace
       WORKSPACES_DIR: /workspace/workspaces
       STATE_DIR: /workspace/.state
-      TMUX_SESSION_PREFIX: ${TMUX_SESSION_PREFIX:-ws}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      ALL_PROXY: ${ALL_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,caddy,ttyd,filebrowser,mihomo}
-      http_proxy: ${HTTP_PROXY:-}
-      https_proxy: ${HTTPS_PROXY:-}
-      all_proxy: ${ALL_PROXY:-}
-      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,caddy,ttyd,filebrowser,mihomo}
+      TMUX_SESSION_PREFIX: ${TMUX_SESSION_PREFIX}
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      ALL_PROXY: ${ALL_PROXY}
+      NO_PROXY: ${NO_PROXY}
+      http_proxy: ${HTTP_PROXY}
+      https_proxy: ${HTTPS_PROXY}
+      all_proxy: ${ALL_PROXY}
+      no_proxy: ${NO_PROXY}
     volumes:
       - ./bin:/opt/codex-workbench/bin:ro
       - ./api:/opt/codex-workbench/api:ro
@@ -58,9 +58,9 @@ services:
   filebrowser:
     image: filebrowser/filebrowser:v2.43.0
     restart: unless-stopped
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    user: "${APP_UID}:${APP_GID}"
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
+      TZ: ${TZ}
       FB_ADDRESS: 0.0.0.0
       FB_PORT: 80
       FB_ROOT: /srv/workspaces
