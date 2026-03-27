@@ -253,6 +253,7 @@ pack
 - `w open <name>` 会 attach 到对应 session
 - `run` 会在该 workspace 的 tmux session 中创建新窗口运行 `codex exec`
 - 日志保存在 `workspaces/<name>/logs/`
+- `ttyd` 默认固定为 `UTF-8 locale`，并给浏览器终端带上 CJK 字体回退，`tmux` 里可以直接显示中文
 
 注意：`run` 默认使用 `--dangerously-bypass-approvals-and-sandbox`，前提是你把容器当作执行边界，不要开放给不可信用户。
 
@@ -336,6 +337,15 @@ watch -n 2 date
 6. 再次点选最近工作区
 
 如果还能看到原窗口，说明 tmux 恢复正常。
+
+### 中文显示排查
+
+如果网页终端或 `tmux` 里中文显示异常，先重建 `ttyd` 镜像再启动：
+
+```bash
+docker-compose build ttyd
+docker-compose up -d ttyd
+```
 
 ## 权限与持久化
 

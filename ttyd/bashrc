@@ -3,6 +3,9 @@ export WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 export WORKSPACES_DIR="${WORKSPACES_DIR:-${WORKSPACE_DIR}/workspaces}"
 export STATE_DIR="${STATE_DIR:-${WORKSPACE_DIR}/.state}"
 export CODEX_HOME="${CODEX_HOME:-/codex-home}"
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-${LC_ALL}}"
 
 # Keep tmux-created shells inside their workspace directory.
 case "${PWD:-}" in

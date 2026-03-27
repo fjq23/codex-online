@@ -9,6 +9,10 @@ WORKSPACES_DIR="${WORKSPACES_DIR:-${WORKSPACE_DIR}/workspaces}"
 STATE_DIR="${STATE_DIR:-${WORKSPACE_DIR}/.state}"
 CODEX_HOME="${CODEX_HOME:-/codex-home}"
 TMUX_SESSION_PREFIX="${TMUX_SESSION_PREFIX:-ws}"
+LANG="${LANG:-C.UTF-8}"
+LC_ALL="${LC_ALL:-C.UTF-8}"
+LC_CTYPE="${LC_CTYPE:-${LC_ALL}}"
+TTYD_FONT_FAMILY="${TTYD_FONT_FAMILY:-JetBrains Mono, Sarasa Mono SC, Noto Sans Mono CJK SC, PingFang SC, Microsoft YaHei UI, monospace}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "entrypoint.sh must start as root" >&2
@@ -31,6 +35,10 @@ export WORKSPACE_DIR
 export WORKSPACES_DIR
 export STATE_DIR
 export TMUX_SESSION_PREFIX
+export LANG
+export LC_ALL
+export LC_CTYPE
+export TTYD_FONT_FAMILY
 
 gosu codex python3 /opt/codex-workbench/api/server.py &
 gosu codex bash -lc 'if [ -n "${HTTP_PROXY:-}" ] || [ -n "${ALL_PROXY:-}" ]; then wb proxy-openai-bg 40 --force; fi' >/dev/null 2>&1 &
@@ -42,6 +50,7 @@ exec gosu codex ttyd \
   -b /terminal/session \
   -w "${WORKSPACE_DIR}" \
   -t fontSize=16 \
+  -t "fontFamily=${TTYD_FONT_FAMILY}" \
   -t cursorStyle=bar \
   -t cursorBlink=true \
   bash --login -c "cd '${WORKSPACE_DIR}' && wb attach-selected"

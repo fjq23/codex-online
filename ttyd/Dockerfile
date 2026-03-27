@@ -51,14 +51,17 @@ RUN useradd -m -s /bin/bash codex
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY bashrc /home/codex/.bashrc
+COPY tmux.conf /home/codex/.tmux.conf
 
 RUN chmod 0755 /usr/local/bin/entrypoint.sh \
-  && chown codex:codex /home/codex/.bashrc
+  && chown codex:codex /home/codex/.bashrc /home/codex/.tmux.conf
 
 ENV HOME=/home/codex \
     CODEX_HOME=/codex-home \
     WORKSPACE_DIR=/workspace \
-    TMUX_SESSION_PREFIX=ws
+    TMUX_SESSION_PREFIX=ws \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 WORKDIR /workspace
 
