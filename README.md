@@ -141,6 +141,28 @@ MIHOMO_API_PORT=19090
 
 这只影响宿主机映射端口，不影响容器内 `ttyd -> mihomo` 的通信。
 
+### 2.1 资源限制
+
+默认已经给各个服务加了 CPU / 内存上限，整套默认约为 2G RAM：
+
+- `ttyd`: `1536m`
+- `filebrowser`: `256m`
+- `caddy`: `128m`
+- `mihomo`: `128m`
+
+如果你要改，在 `.env` 里覆盖这些值即可：
+
+```dotenv
+TTYD_CPUS=1.25
+TTYD_MEM_LIMIT=1536m
+FILEBROWSER_CPUS=0.25
+FILEBROWSER_MEM_LIMIT=256m
+CADDY_CPUS=0.25
+CADDY_MEM_LIMIT=128m
+MIHOMO_CPUS=0.25
+MIHOMO_MEM_LIMIT=128m
+```
+
 ### 3. 打开工作台
 
 - `http://SERVER_IP:8080/`

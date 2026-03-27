@@ -4,6 +4,8 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    cpus: "${CADDY_CPUS:-0.25}"
+    mem_limit: "${CADDY_MEM_LIMIT:-128m}"
     depends_on:
       - ttyd
       - filebrowser
@@ -30,6 +32,8 @@ services:
         ALL_PROXY: ${ALL_PROXY}
         NO_PROXY: ${NO_PROXY}
     restart: unless-stopped
+    cpus: "${TTYD_CPUS:-1.25}"
+    mem_limit: "${TTYD_MEM_LIMIT:-1536m}"
     environment:
       TZ: ${TZ}
       APP_UID: ${APP_UID}
@@ -60,6 +64,8 @@ services:
   filebrowser:
     image: filebrowser/filebrowser:v2.43.0
     restart: unless-stopped
+    cpus: "${FILEBROWSER_CPUS:-0.25}"
+    mem_limit: "${FILEBROWSER_MEM_LIMIT:-256m}"
     user: "${APP_UID}:${APP_GID}"
     environment:
       TZ: ${TZ}

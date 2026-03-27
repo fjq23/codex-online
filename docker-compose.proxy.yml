@@ -5,6 +5,8 @@ services:
     build:
       context: ./proxy/mihomo
     restart: unless-stopped
+    cpus: "${MIHOMO_CPUS:-0.25}"
+    mem_limit: "${MIHOMO_MEM_LIMIT:-128m}"
     ports:
       - "127.0.0.1:${MIHOMO_HTTP_PORT}:7890"
       - "127.0.0.1:${MIHOMO_SOCKS_PORT}:7891"
